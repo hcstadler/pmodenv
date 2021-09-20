@@ -1,11 +1,50 @@
+#![warn(missing_docs)]
+
+//! Program to produce modulefile lines by looking at Linux shell environment differences
+//!
+//! # Call options
+//! ```text
+//! USAGE:
+//!    pmodenv [OPTIONS]
+//!
+//! FLAGS:
+//!    -h, --help       Prints help information
+//!    -V, --version    Prints version information
+//!
+//! OPTIONS:
+//!    -c, --comment <COMMENT>       visible in the result
+//!    -e, --except <VAR>...         ignores the environment variable VAR
+//!    -p, --prefix <PREFIX>         turns PREFIX into a variable
+//!    -r, --replace <OLD:NEW>...    replaces OLD path with NEW path
+//! ```
+//!
+//! # Example
+//! ```text
+//! $ cat /proc/self/environ > /tmp/env.txt
+//! $ PATH=${HOME}/bin:${PATH} HELLO=1 pmodenv -p ${HOME} -e _ < /tmp/env.txt
+//! ## produced by: pmodenv -p /home/stadler_h -e _
+//! set PREFIX /home/stadler_h
+//! setenv HELLO 1
+//! prepend-path PATH ${PREFIX}/bin
+//! ```
+
 extern crate clap;
 use std::env::args;
-use clap::{Arg, App};
 use std::collections::BTreeMap;
-use std::fs::canonicalize;
 
+/// Name of the prefix variable
+///
+/// The path represented by `PREFIX_VAR` can be set using the `--prefix=<path>` commandline option
 const PREFIX_VAR: &str = "PREFIX";
 
+/// Parse Linux shell environment from `io::stdin`
+///
+/// The input read from `io::stdin` is expected to be in the format of `/proc/self/environ`
+///
+/// # Argument
+/// * `before` Map that will be filled with the environment variable to value mappings by reading `io::stdin`
+/// # Error Handling
+/// Crash if `io::stdin` doesn't deliver an environment in the format of `/proc/self/environ`
 fn parse_env(before: &mut BTreeMap<String, String>)
 {
     use std::io;
@@ -23,8 +62,15 @@ fn parse_env(before: &mut BTreeMap<String, String>)
     }
 }
 
+/// Return canonic path
+///
+/// # Argument
+/// * `path` String slice representing a file system path
+/// # Returns
+/// String containing the canonicalized path. If `path` cannot be canonicalized, it is returned as is.
 fn to_canonic(path: &str) -> String
 {
+    use std::fs::canonicalize;
     if let Ok(p) = canonicalize(path) {
         p.to_str().unwrap().to_string()
     } else {
@@ -32,6 +78,15 @@ fn to_canonic(path: &str) -> String
     }
 }
 
+/// Map path components
+///
+/// The path is assumed to consist of components separated by `:`. Components are first canonicalized using [to_canonic], then the prefix is replaced by the `${`[PREFIX_VAR]`}`
+///
+/// # Argument
+/// * `path` String slice representing a list of file system paths separated by `:`
+/// * `prefix` String that will be replaced by `${`[PREFIX_VAR]`}`, typically a path prefix
+/// # Returns
+/// String containing the mapped path.
 fn map_path(path: &str, prefix: Option<&str>) -> String
 {
     let mut path_list = path.trim().trim_matches(':').split(':');
@@ -52,45 +107,83 @@ fn map_path(path: &str, prefix: Option<&str>) -> String
     }
 }
 
+/// Parse commandline arguments
+/// # Return
+/// [clap::ArgMatches] object
+fn parse_cli_args<'a>() -> clap::ArgMatches<'a>
+{
+    use clap::{Arg, App};
+    App::new("pmodenv")
+        .version("1.0")
+        .author("hstadler@protonmail.ch")
+        .about("Turns environment differences into a module file
+
+$ cat /proc/self/environ > /tmp/env.txt
+$ PATH=${HOME}/bin:${PATH} HELLO=1 ../target/debug/pmodenv -p ${HOME} -e _ < /tmp/env.txt
+# produced by: ../target/debug/pmodenv -p /home/stadler_h -e _
+set PREFIX /home/stadler_h
+setenv HELLO 1
+prepend-path PATH ${PREFIX}/bin")
+        .arg(Arg::with_name("except")
+                .takes_value(true)
+                .multiple(true)
+                .short("e")
+                .long("except")
+                .value_name("VAR")
+                .help("ignores the environment variable VAR"))
+        .arg(Arg::with_name("replace")
+                .takes_value(true)
+                .multiple(true)
+                .short("r")
+                .long("replace")
+                .value_name("OLD:NEW")
+                .help("replaces OLD path with NEW path"))
+        .arg(Arg::with_name("prefix")
+                .takes_value(true)
+                .short("p")
+                .long("prefix")
+                .value_name("PREFIX")
+                .help("turns PREFIX into a variable"))
+        .arg(Arg::with_name("comment")
+                .takes_value(true)
+                .short("c")
+                .long("comment")
+                .value_name("COMMENT")
+                .help("visible in the result"))
+        .get_matches()
+}
+
+/// Print module file header
+///
+/// The header will specify how the output was produced
+/// # Example
+/// ```text
+/// ## produced by: pmodenv -p /home/stadler_h -e _
+/// ```
+fn print_header()
+{
+    print!("# produced by:");
+    for arg in args() {
+        print!(" {}", arg);
+    }
+    println!();
+}
+
+/// Run the program
 fn main()
 {
     use std::env;
     use std::collections::BTreeSet;
 
-    print!("# produced by:");
-    for a in args() {
-        print!(" {}", a);
-    }
-    println!();
-    let args = App::new("pmodenv")
-                .version("1.0")
-                .author("hans-christian.stadler@psi.ch")
-                .about("Turns environment differences into a module file
+    let cli_args = parse_cli_args();
 
-  $ cat /proc/self/environ > /tmp/env.txt
-  $ PATH=${HOME}/bin:${PATH} HELLO=1 ../target/debug/pmodenv -p ${HOME} -e _ < /tmp/env.txt
-  # produced by: ../target/debug/pmodenv -p /home/stadler_h -e _
-  set prefix /home/stadler_h
-  setenv HELLO 1
-  prepend-path PATH ${PREFIX}/bin")
-                .arg(Arg::with_name("except")
-                        .takes_value(true)
-                        .multiple(true)
-                        .short("e")
-                        .long("except")
-                        .value_name("VAR")
-                        .help("ignores the environment variable"))
-                .arg(Arg::with_name("prefix")
-                        .takes_value(true)
-                        .short("p")
-                        .long("prefix")
-                        .value_name("PREFIX")
-                        .help("turns prefix into a variable"))
-                .get_matches();
-    let prefix = args.value_of("prefix");
+    print_header();
+
+    let prefix = cli_args.value_of("prefix");
     if let Some(path) = prefix {
-        println!("set prefix {}", path);
+        println!("set {} {}", PREFIX_VAR, path);
     }
+
     let mut before = BTreeMap::new();
     parse_env(&mut before);
     let mut after = BTreeMap::new();
@@ -100,7 +193,7 @@ fn main()
     let vars_before : BTreeSet<&str> = before.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
     let vars_after : BTreeSet<&str> = after.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
     let mut vars : BTreeSet<&str> = vars_before.union(&vars_after).copied().collect::<BTreeSet<&str>>();
-    let exceptions = args.values_of("except");
+    let exceptions = cli_args.values_of("except");
     if let Some(values) = exceptions {
         for ref v in values {
             vars.remove(v);

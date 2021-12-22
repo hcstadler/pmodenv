@@ -79,11 +79,8 @@ fn parse_env(before: &mut BTreeMap<String, String>)
 fn to_canonic(path: &str) -> String
 {
     use std::fs::canonicalize;
-    if let Ok(p) = canonicalize(path) {
-        p.to_str().unwrap().to_string()
-    } else {
-        path.to_string()
-    }
+    canonicalize(path).map_or_else(|_| path.to_string(),
+                                   |p| p.to_str().unwrap_or_else(|| panic!("unsupported path: {}", path)).to_string())
 }
 
 /// Map path components
@@ -93,14 +90,12 @@ fn to_canonic(path: &str) -> String
 ///
 /// # Argument
 /// * `path` String slice representing a list of file system paths separated by `:`
-/// * `prefix` String that will be replaced by `${`[PREFIX_VAR]`}`, typically a path prefix
 /// * `drops` Optional vector of path fragments. Paths containing these will be dropped
 /// * `replacements` Optional vector of path fragment replacements
-/// * `vars` Optional variable to path fragment mapping
+/// * `vars` Optional variable to path fragment mapping, including prefix
 /// # Returns
 /// String containing the mapped path.
 fn map_path(path: &str,
-            prefix: &Option<&str>,
             drops: &Option<Vec<&str>>,
             replacements: &Option<Vec<Replacement>>,
             vars: &Option<BTreeMap<&str, &str>>,
@@ -109,26 +104,19 @@ fn map_path(path: &str,
     use std::path::Path;
     let mut path_list: Vec<String> = path.trim().trim_matches(':').split(':').map(to_canonic).collect();
     if check_path {
-        path_list = path_list.into_iter().filter(|p| Path::new(p).exists()).collect();
+        path_list = path_list.into_iter().filter(|p| Path::new(p).exists()).collect()
     }
     if let Some(drop_list) = drops {
-        path_list = path_list.into_iter().filter(|p| !drop_list.iter().any(|d| p.contains(d))).collect();
+        path_list = path_list.into_iter().filter(|p| !drop_list.iter().any(|d| p.contains(d))).collect()
     }
     if let Some(replacement_list) = replacements {
-        path_list = path_list.into_iter().map(|p| replacement_list.iter().fold(p, |path, r| path.replace(r.0, r.1))).collect();
+        path_list = path_list.into_iter().map(|p| replacement_list.iter().fold(p, |path, r| path.replace(r.0, r.1))).collect()
     }
     if let Some(vars_map) = vars {
         path_list = path_list.into_iter().map(|mut p| {
-            for (var, val) in vars_map.iter() {
-                p = p.replace(val, &(String::from("${") + var + "}"));
-            }
+            vars_map.iter().for_each(|(var, val)| p = p.replace(val, &(String::from("${") + var + "}")));
             p
-        }).collect();
-    }
-    if let Some(prf) = prefix {
-        let prf = &to_canonic(prf);
-        let pvar = "${".to_owned() + PREFIX_VAR + "}";
-        path_list = path_list.into_iter().map(|p| p.replace(prf, &pvar)).collect();
+        }).collect()
     }
     path_list.into_iter().fold(String::from(""), |path, p| path + ":" + &p).trim_start_matches(':').to_string()
 }
@@ -145,33 +133,53 @@ fn parse_cli_args<'a>() -> clap::ArgMatches<'a>
         .author("hstadler@protonmail.ch")
         .about("Turns environment differences into a module file
 
-$ cat /proc/self/environ > /tmp/env.txt
-$ PATH=${HOME}/bin:${PATH} HELLO=1 ../target/debug/pmodenv -p ${HOME} -e _ < /tmp/env.txt
-# produced by: ../target/debug/pmodenv -p /home/stadler_h -e _
-set PREFIX /home/stadler_h
-setenv HELLO 1
-prepend-path PATH ${PREFIX}/bin")
+EXAMPLE:
+  $ cat /proc/self/environ > /tmp/env.txt
+  $ PATH=${HOME}/bin:${PATH} HELLO=1 ../target/debug/pmodenv -p ${HOME} -e _ < /tmp/env.txt
+  # produced by: ../target/debug/pmodenv -p /home/stadler_h -e _
+  set PREFIX /home/stadler_h
+  setenv HELLO 1
+  prepend-path PATH ${PREFIX}/bin
+
+PRECONDITIONS:
+  - Variable names are assumed to be 'nice': no strange characters.
+  - Path environment variables are assumed to have PATH in their name.
+  - Variable values are assumed to be 'nice' as well.
+  - Paths are assumed to be 'nicely' separated by ':'.
+  - Replacement and variable options are assumed to be 'nice': no nonsense overlaps
+
+EXECUTION:
+  For path changes
+  1 - Canonicalize components in the change
+  2 - Drop components that cannot be accessed (optional)
+  3 - Drop components containing drop option fragments (optional)
+  4 - Apply fragment replacements to components in the order given on the commandline (optional)
+  5 - Substitute variable value fragments of the components with the variables (including PREFIX)
+      in random order (optional)
+
+SECURITY:
+  Never use the output without checking it, as some people are not 'nice'.")
         .arg(Arg::with_name("except")
                 .takes_value(true)
                 .multiple(true)
                 .short("e")
                 .long("except")
                 .value_name("VAR")
-                .help("ignores the environment variable VAR"))
+                .help("Ignores the environment variable VAR"))
         .arg(Arg::with_name("replace")
                 .takes_value(true)
                 .multiple(true)
                 .short("r")
                 .long("replace")
                 .value_name("OLD:NEW")
-                .help("replaces OLD path with NEW path"))
+                .help("Replaces OLD path fragment with NEW path fragment"))
         .arg(Arg::with_name("drop")
                 .takes_value(true)
                 .multiple(true)
                 .short("d")
                 .long("drop")
-                .value_name("PATH")
-                .help("drop PATH"))
+                .value_name("FRAGMENT")
+                .help("Drop paths containing FRAGMENT"))
         .arg(Arg::with_name("check-path")
                 .takes_value(false)
                 .short("x")
@@ -182,20 +190,20 @@ prepend-path PATH ${PREFIX}/bin")
                 .short("p")
                 .long("prefix")
                 .value_name("PREFIX")
-                .help("turns PREFIX into a variable"))
+                .help("Turns PREFIX into a variable"))
         .arg(Arg::with_name("var")
                 .takes_value(true)
                 .multiple(true)
-                .short("v")
+                .short("s")
                 .long("var")
                 .value_name("VAR=VAL")
-                .help("turns VAL into a variable"))
+                .help("Turns VAL into a variable"))
         .arg(Arg::with_name("comment")
                 .takes_value(true)
                 .short("c")
                 .long("comment")
                 .value_name("COMMENT")
-                .help("visible in the result"))
+                .help("Visible in the result"))
         .get_matches()
 }
 
@@ -232,23 +240,26 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
 /// * `vars` Optional iterator over variable substitution strings
 /// # Return
 /// Optional mapping from variable names to variable values
-fn parse_variables<'a, T: Iterator<Item = &'a str>>(vars: Option<T>) -> Option<BTreeMap<&'a str, &'a str>>
+fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, vars: Option<T>) -> Option<BTreeMap<&'a str, &'a str>>
 {
+    let mut res = BTreeMap::<&str, &str>::new();
+    prefix.and_then(|v| res.insert(PREFIX_VAR, v));
     if let Some(vars_iter) = vars {
-        let mut res = BTreeMap::<&str, &str>::new();
         vars_iter.fold(&mut res, |btree, v| {
             let mut split = v.splitn(2, '=');
             let var: &'a str = split.next().unwrap_or_else(|| panic!("var error: first part of {}", v));
             let val: &'a str = split.next().unwrap_or_else(|| panic!("var error: second part of {}", v));
-            if let Some(dup) = btree.get(var) {
-                panic!("duplicate definition of variable {}", dup);
-            }
+            if btree.get(var).is_some() {
+                panic!("duplicate definition of variable {}", var)
+            };
             btree.insert(var, val);
             btree
         });
-        Some(res)
-    } else {
+    }
+    if res.is_empty() {
         None
+    } else {
+        Some(res)
     }
 }
 
@@ -268,7 +279,7 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
 fn print_str(s: &str)
 {
     if s.lines().count() > 1 {
-        panic!("cannot handle multiline output:\n{}", s);
+        panic!("cannot handle multiline output:\n{}", s)
     }
     println!("{}", s);
 }
@@ -281,7 +292,7 @@ fn print_var(op: &str, var: &str)
 fn print_var_val(op: &str, var: &str, val: &str)
 {
     if !val.is_empty() {
-        print_str(&format!("{} {} {}", op, var, val));
+        print_str(&format!("{} {} {}", op, var, val))
     }
 }
 
@@ -294,21 +305,13 @@ fn print_var_val(op: &str, var: &str, val: &str)
 /// set PREFIX /home/stadler_h
 /// set BIN bin
 /// ```
-fn print_header(prefix: &Option<&str>, vars: &Option<BTreeMap<&str, &str>>)
+fn print_header(vars: &Option<BTreeMap<&str, &str>>)
 {
     use std::env::args;
-    let mut comment = String::from("# produced by:");
-    for arg in args() {
-        comment = comment + " " + &arg;
-    }
+    let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
     print_str(&comment);
-    if let Some(path) = prefix {
-        print_var_val("set", PREFIX_VAR, path);
-    }
-    if let Some(btree) = vars {
-        for (var, val) in btree.iter() {
-            print_var_val("set", var, val);
-        }
+    if let Some(btree) = vars.as_ref() {
+        btree.iter().for_each(|(var, val)| print_var_val("set", var, val))
     }
 }
 
@@ -322,11 +325,10 @@ fn main()
 
     let exceptions = cli_args.values_of("except");
     let replacements = parse_replacements(cli_args.values_of("replace"));
-    let variables = parse_variables(cli_args.values_of("var"));
+    let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var"));
     let drops = parse_drops(cli_args.values_of("drop"));
     let check_path = cli_args.is_present("check-path");
-    let prefix = cli_args.value_of("prefix");
-    print_header(&prefix, &variables);
+    print_header(&variables);
 
     let mut before = BTreeMap::new();
     parse_env(&mut before);
@@ -338,10 +340,8 @@ fn main()
     let vars_after : BTreeSet<&str> = after.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
     let mut vars : BTreeSet<&str> = vars_before.union(&vars_after).copied().collect::<BTreeSet<&str>>();
     if let Some(list) = exceptions {
-        for var in list {
-            vars.remove(var);
-        }
-    }
+        list.for_each(|var| { vars.remove(var); })
+    };
     for var in vars {
         if vars_before.contains(&var) {
             if vars_after.contains(&var) {
@@ -351,28 +351,28 @@ fn main()
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') {
-                            print_var_val("append-path", var, &map_path(delta, &prefix, &drops, &replacements, &variables, check_path));
+                            print_var_val("append-path", var, &map_path(delta, &drops, &replacements, &variables, check_path))
                         } else {
-                            eprintln!("# WARNING: unsupported path suffix in variable: {}", var);
+                            eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') {
-                            print_var_val("prepend-path", var, &map_path(delta, &prefix, &drops, &replacements, &variables, check_path));
+                            print_var_val("prepend-path", var, &map_path(delta, &drops, &replacements, &variables, check_path))
                         } else {
-                            eprintln!("# WARNING: unsupported path prefix in variable: {}", var);
+                            eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
                         }
                     } else {
-                        eprintln!("# WARNING: ignoring unsupported change in variable: {}", var);
+                        eprintln!("# WARNING: ignoring unsupported change in variable: {}", var)
                     }
                 }
             } else {
-                print_var("unsetenv", var);
+                print_var("unsetenv", var)
             }
         } else if var.to_lowercase().contains("path") {
-            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), &prefix, &drops, &replacements, &variables, check_path));
+            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), &drops, &replacements, &variables, check_path))
         } else {
-            print_var_val("setenv", var, after.get(var).unwrap());
+            print_var_val("setenv", var, after.get(var).unwrap())
         }
     }
 }

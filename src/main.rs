@@ -94,20 +94,20 @@ fn to_canonic(path: &str) -> String
 /// # Argument
 /// * `path` String slice representing a list of file system paths separated by `:`
 /// * `prefix` String that will be replaced by `${`[PREFIX_VAR]`}`, typically a path prefix
-/// * `drops` Optional iterator over contiguous path fragments. Paths containing these will be dropped
+/// * `drops` Optional vector of path fragments. Paths containing these will be dropped
 /// * `replacements` Optional vector of path fragment replacements
 /// * `vars` Optional variable to path fragment mapping
 /// # Returns
 /// String containing the mapped path.
-fn map_path<'a, T: Iterator<Item = &'a str>>(path: &str,
-                                             prefix: &Option<&str>,
-                                             drops: Option<T>,
-                                             replacements: &Option<Vec<Replacement<'a>>>,
-                                             vars: &Option<BTreeMap<&'a str, &'a str>>) -> String
+fn map_path(path: &str,
+            prefix: &Option<&str>,
+            drops: &Option<Vec<&str>>,
+            replacements: &Option<Vec<Replacement>>,
+            vars: &Option<BTreeMap<&str, &str>>) -> String
 {
     let mut path_list: Vec<String> = path.trim().trim_matches(':').split(':').map(to_canonic).collect();
-    if let Some(mut drop_iter) = drops {
-        path_list = path_list.into_iter().filter(|p| !drop_iter.any(|d| p.contains(d))).collect();
+    if let Some(drop_list) = drops {
+        path_list = path_list.into_iter().filter(|p| !drop_list.iter().any(|d| p.contains(d))).collect();
     }
     if let Some(replacement_list) = replacements {
         path_list = path_list.into_iter().map(|p| replacement_list.iter().fold(p, |path, r| path.replace(r.0, r.1))).collect();
@@ -242,6 +242,23 @@ fn parse_variables<'a, T: Iterator<Item = &'a str>>(vars: Option<T>) -> Option<B
     }
 }
 
+/// Parse path drop fragments
+///
+/// Create a vector of path drop fragments.
+///
+/// # Argument
+/// * `drops` Optional iterator over path drop fragments
+/// # Return
+/// Optional vector of path drop fragments
+fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<&'a str>>
+{
+    if let Some(drops_iter) = drops {
+        Some(drops_iter.collect())
+    } else {
+        None
+    }
+}
+
 /// Print module file header
 ///
 /// The header will specify how the output was produced and define the variables
@@ -280,7 +297,7 @@ fn main()
     let exceptions = cli_args.values_of("except");
     let replacements = parse_replacements(cli_args.values_of("replace"));
     let variables = parse_variables(cli_args.values_of("var"));
-    let drops = cli_args.values_of("drop");
+    let drops = parse_drops(cli_args.values_of("drop"));
     let prefix = cli_args.value_of("prefix");
     print_header(&prefix, &variables);
 
@@ -307,14 +324,14 @@ fn main()
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') {
-                            println!("append-path {} {}", var, map_path(delta, &prefix, drops.clone(), &replacements, &variables));
+                            println!("append-path {} {}", var, map_path(delta, &prefix, &drops, &replacements, &variables));
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var);
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') {
-                            println!("prepend-path {} {}", var, map_path(delta, &prefix, drops.clone(), &replacements, &variables));
+                            println!("prepend-path {} {}", var, map_path(delta, &prefix, &drops, &replacements, &variables));
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var);
                         }
@@ -326,7 +343,7 @@ fn main()
                 println!("unsetenv {}", var);
             }
         } else if var.to_lowercase().contains("path") {
-            println!("prepend-path {} {}", var, map_path(after.get(var).unwrap(), &prefix, drops.clone(), &replacements, &variables));
+            println!("prepend-path {} {}", var, map_path(after.get(var).unwrap(), &prefix, &drops, &replacements, &variables));
         } else {
             println!("setenv {} {}", var, after.get(var).unwrap());
         }

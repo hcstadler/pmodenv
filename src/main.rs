@@ -5,30 +5,32 @@
 //! # Call options
 //! ```text
 //! USAGE:
-//! pmodenv [OPTIONS]
+//!     pmodenv [FLAGS] [OPTIONS]
 //!
 //! FLAGS:
-//!     -h, --help       Prints help information
-//!     -V, --version    Prints version information
+//!     -x, --check-path    Only keep path components that are accessible by current user on the local machine
+//!     -h, --help          Prints help information
+//!     -V, --version       Prints version information
 //!
 //! OPTIONS:
-//!     -c, --comment <COMMENT>       visible in the result
-//!     -d, --drop <PATH>...          drop PATH
-//!     -e, --except <VAR>...         ignores the environment variable VAR
-//!     -p, --prefix <PREFIX>         turns PREFIX into a variable
-//!     -r, --replace <OLD:NEW>...    replaces OLD path with NEW path
-//!     -v, --var <VAR=VAL>...        turns VAL into a variable
+//!     -c, --comment <COMMENT>       Visible in the result
+//!     -d, --drop <FRAGMENT>...      Drop paths containing FRAGMENT
+//!     -e, --except <VAR>...         Ignores the environment variable VAR
+//!     -p, --prefix <PREFIX>         Turns PREFIX into a variable
+//!     -r, --replace <OLD:NEW>...    Replaces OLD path fragment with NEW path fragment
+//!     -s, --var <VAR=VAL>...        Turns VAL into a variable
+//! USAGE:
 //! ```
 //!
 //! # Example
 //! ```text
 //! $ cat /proc/self/environ > /tmp/env.txt
-//! $ PATH=/opt/nvidia/bin:${HOME}/bin:${PATH} HELLO=1 ../target/debug/pmodenv -p ${HOME} -d nvidia -r bin:local/bin -r app:ap -v BIN=bin -e _ < /tmp/env.txt
-//! ## produced by: ../target/debug/pmodenv -p /home/stadler_h -d nvidia -r bin:local/bin -r app:ap -v BIN=bin -e _
+//! $ PATH=/opt/nvidia/bin:${HOME}/bin:${PATH} HELLO=1 ../target/debug/pmodenv -p ${HOME} -s NVIDIA_HOME=/opt/nvidia -e _ < /tmp/env.txt
+//! ## produced by: ../target/debug/pmodenv -p /home/stadler_h -s NVIDIA_HOME=/opt/nvidia -e _
+//! set NVIDIA_HOME /opt/nvidia
 //! set PREFIX /home/stadler_h
-//! set BIN bin
 //! setenv HELLO 1
-//! prepend-path PATH ${PREFIX}/local/${BIN}
+//! prepend-path PATH ${NVIDIA_HOME}/bin:${PREFIX}/bin
 //! ```
 
 extern crate clap;
@@ -96,8 +98,8 @@ fn to_canonic(path: &str) -> String
 /// # Returns
 /// String containing the mapped path.
 fn map_path(path: &str,
-            drops: &Option<Vec<&str>>,
-            replacements: &Option<Vec<Replacement>>,
+            drops: Option<&[&str]>,
+            replacements: Option<&[Replacement]>,
             vars: &Option<BTreeMap<&str, &str>>,
             check_path: bool) -> String
 {
@@ -351,14 +353,14 @@ fn main()
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') {
-                            print_var_val("append-path", var, &map_path(delta, &drops, &replacements, &variables, check_path))
+                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), &variables, check_path))
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') {
-                            print_var_val("prepend-path", var, &map_path(delta, &drops, &replacements, &variables, check_path))
+                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), &variables, check_path))
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
                         }
@@ -370,7 +372,7 @@ fn main()
                 print_var("unsetenv", var)
             }
         } else if var.to_lowercase().contains("path") {
-            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), &drops, &replacements, &variables, check_path))
+            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), &variables, check_path))
         } else {
             print_var_val("setenv", var, after.get(var).unwrap())
         }

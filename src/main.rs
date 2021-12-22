@@ -88,7 +88,7 @@ fn to_canonic(path: &str) -> String
 
 /// Map path components
 ///
-/// The path is assumed to consist of components separated by `:`. Components are first canonicalized using [to_canonic], then the components matching drop fragments are dropped,
+/// The path is assumed to consist of components separated by `:`. Components are first canonicalized using [to_canonic], then nonexistent components and those matching drop fragments are dropped,
 /// then fragment replacements are applied, and finally variable values are replaced with `${`VAR`}` and prefix is replaced by the `${`[PREFIX_VAR]`}`
 ///
 /// # Argument
@@ -103,9 +103,14 @@ fn map_path(path: &str,
             prefix: &Option<&str>,
             drops: &Option<Vec<&str>>,
             replacements: &Option<Vec<Replacement>>,
-            vars: &Option<BTreeMap<&str, &str>>) -> String
+            vars: &Option<BTreeMap<&str, &str>>,
+            check_path: bool) -> String
 {
+    use std::path::Path;
     let mut path_list: Vec<String> = path.trim().trim_matches(':').split(':').map(to_canonic).collect();
+    if check_path {
+        path_list = path_list.into_iter().filter(|p| Path::new(p).exists()).collect();
+    }
     if let Some(drop_list) = drops {
         path_list = path_list.into_iter().filter(|p| !drop_list.iter().any(|d| p.contains(d))).collect();
     }
@@ -115,7 +120,7 @@ fn map_path(path: &str,
     if let Some(vars_map) = vars {
         path_list = path_list.into_iter().map(|mut p| {
             for (var, val) in vars_map.iter() {
-                p = p.replace(val, (String::from("${") + var + "}").as_str());
+                p = p.replace(val, &(String::from("${") + var + "}"));
             }
             p
         }).collect();
@@ -167,6 +172,11 @@ prepend-path PATH ${PREFIX}/bin")
                 .long("drop")
                 .value_name("PATH")
                 .help("drop PATH"))
+        .arg(Arg::with_name("check-path")
+                .takes_value(false)
+                .short("x")
+                .long("check-path")
+                .help("Only keep path components that are accessible by current user on the local machine"))
         .arg(Arg::with_name("prefix")
                 .takes_value(true)
                 .short("p")
@@ -252,10 +262,26 @@ fn parse_variables<'a, T: Iterator<Item = &'a str>>(vars: Option<T>) -> Option<B
 /// Optional vector of path drop fragments
 fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<&'a str>>
 {
-    if let Some(drops_iter) = drops {
-        Some(drops_iter.collect())
-    } else {
-        None
+    drops.map(|drops_iter| drops_iter.collect())
+}
+
+fn print_str(s: &str)
+{
+    if s.lines().count() > 1 {
+        panic!("cannot handle multiline output:\n{}", s);
+    }
+    println!("{}", s);
+}
+
+fn print_var(op: &str, var: &str)
+{
+    print_str(&format!("{} {}", op, var));
+}
+
+fn print_var_val(op: &str, var: &str, val: &str)
+{
+    if !val.is_empty() {
+        print_str(&format!("{} {} {}", op, var, val));
     }
 }
 
@@ -271,17 +297,17 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
 fn print_header(prefix: &Option<&str>, vars: &Option<BTreeMap<&str, &str>>)
 {
     use std::env::args;
-    print!("# produced by:");
+    let mut comment = String::from("# produced by:");
     for arg in args() {
-        print!(" {}", arg);
+        comment = comment + " " + &arg;
     }
-    println!();
+    print_str(&comment);
     if let Some(path) = prefix {
-        println!("set {} {}", PREFIX_VAR, path);
+        print_var_val("set", PREFIX_VAR, path);
     }
     if let Some(btree) = vars {
         for (var, val) in btree.iter() {
-            println!("set {} {}", var, val);
+            print_var_val("set", var, val);
         }
     }
 }
@@ -298,6 +324,7 @@ fn main()
     let replacements = parse_replacements(cli_args.values_of("replace"));
     let variables = parse_variables(cli_args.values_of("var"));
     let drops = parse_drops(cli_args.values_of("drop"));
+    let check_path = cli_args.is_present("check-path");
     let prefix = cli_args.value_of("prefix");
     print_header(&prefix, &variables);
 
@@ -324,14 +351,14 @@ fn main()
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') {
-                            println!("append-path {} {}", var, map_path(delta, &prefix, &drops, &replacements, &variables));
+                            print_var_val("append-path", var, &map_path(delta, &prefix, &drops, &replacements, &variables, check_path));
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var);
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') {
-                            println!("prepend-path {} {}", var, map_path(delta, &prefix, &drops, &replacements, &variables));
+                            print_var_val("prepend-path", var, &map_path(delta, &prefix, &drops, &replacements, &variables, check_path));
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var);
                         }
@@ -340,12 +367,12 @@ fn main()
                     }
                 }
             } else {
-                println!("unsetenv {}", var);
+                print_var("unsetenv", var);
             }
         } else if var.to_lowercase().contains("path") {
-            println!("prepend-path {} {}", var, map_path(after.get(var).unwrap(), &prefix, &drops, &replacements, &variables));
+            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), &prefix, &drops, &replacements, &variables, check_path));
         } else {
-            println!("setenv {} {}", var, after.get(var).unwrap());
+            print_var_val("setenv", var, after.get(var).unwrap());
         }
     }
 }

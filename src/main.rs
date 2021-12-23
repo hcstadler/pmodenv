@@ -87,20 +87,24 @@ fn to_canonic(path: &str) -> String
 
 /// Map path components
 ///
-/// The path is assumed to consist of components separated by `:`. Components are first canonicalized using [to_canonic], then nonexistent components and those matching drop fragments are dropped,
-/// then fragment replacements are applied, and finally variable values are replaced with `${`VAR`}` and prefix is replaced by the `${`[PREFIX_VAR]`}`
+/// The path is assumed to consist of components separated by `:`.
+/// Components are first canonicalized using [to_canonic],
+/// then nonexistent components and those matching drop fragments are dropped,
+/// then fragment replacements are applied (in slice element order),
+/// and finally variable values (in cluding prefix) are replaced in random order with `${`VAR`}` (or `${`[PREFIX_VAR]`}`, resp)
 ///
 /// # Argument
 /// * `path` String slice representing a list of file system paths separated by `:`
 /// * `drops` Optional vector of path fragments. Paths containing these will be dropped
 /// * `replacements` Optional vector of path fragment replacements
 /// * `vars` Optional variable to path fragment mapping, including prefix
+/// * `check_path` If true, filter out paths that are not accessible
 /// # Returns
 /// String containing the mapped path.
 fn map_path(path: &str,
             drops: Option<&[&str]>,
             replacements: Option<&[Replacement]>,
-            vars: &Option<BTreeMap<&str, &str>>,
+            vars: Option<&BTreeMap<&str, &str>>,
             check_path: bool) -> String
 {
     use std::path::Path;
@@ -353,14 +357,14 @@ fn main()
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') {
-                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), &variables, check_path))
+                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') {
-                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), &variables, check_path))
+                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
                         }
@@ -372,7 +376,7 @@ fn main()
                 print_var("unsetenv", var)
             }
         } else if var.to_lowercase().contains("path") {
-            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), &variables, check_path))
+            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
         } else {
             print_var_val("setenv", var, after.get(var).unwrap())
         }

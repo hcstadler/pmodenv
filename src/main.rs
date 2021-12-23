@@ -108,7 +108,7 @@ fn map_path(path: &str,
             check_path: bool) -> String
 {
     use std::path::Path;
-    let mut path_list: Vec<String> = path.trim().trim_matches(':').split(':').map(to_canonic).collect();
+    let mut path_list: Vec<String> = path.trim().split(':').filter(|p| !p.is_empty()).map(to_canonic).collect();
     if check_path {
         path_list = path_list.into_iter().filter(|p| Path::new(p).exists()).collect()
     }
@@ -229,6 +229,9 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
                 let mut split = s.splitn(2, ':');
                 let orig: &'a str = split.next().unwrap_or_else(|| panic!("replace error: first part of {}", s));
                 let repl: &'a str = split.next().unwrap_or_else(|| panic!("replace error: second part of {}", s));
+                if orig.is_empty() || repl.is_empty() {
+                    panic!("unsupported replacement for <{}>", orig)
+                }
                 Replacement(orig, repl)
             }).collect();
         Some(replacements_list)
@@ -255,6 +258,9 @@ fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, var
             let mut split = v.splitn(2, '=');
             let var: &'a str = split.next().unwrap_or_else(|| panic!("var error: first part of {}", v));
             let val: &'a str = split.next().unwrap_or_else(|| panic!("var error: second part of {}", v));
+            if var.is_empty() || val.is_empty() {
+                panic!("unsupported variable substitution for <{}>", var)
+            }
             if btree.get(var).is_some() {
                 panic!("duplicate definition of variable {}", var)
             };
@@ -356,18 +362,25 @@ fn main()
                 if val_before != val_after {
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
-                        if delta.starts_with(':') {
+                        if delta.starts_with(':') ^ val_before.ends_with(':') {
                             print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
-                        if delta.ends_with(':') {
+                        if delta.ends_with(':') ^ val_before.starts_with(':') {
                             print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
                         }
+                    } else if val_after.contains(val_before) {
+                        let start_end = val_after.split(val_before).collect::<Vec<&str>>();
+                        if start_end.len() != 2 {
+                            eprintln!("# WARNING: ignoring unexpected change in variable: {}", var)
+                        }
+                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path));
+                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path));
                     } else {
                         eprintln!("# WARNING: ignoring unsupported change in variable: {}", var)
                     }
@@ -375,10 +388,13 @@ fn main()
             } else {
                 print_var("unsetenv", var)
             }
-        } else if var.to_lowercase().contains("path") {
-            print_var_val("prepend-path", var, &map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
         } else {
-            print_var_val("setenv", var, after.get(var).unwrap())
+            let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path);
+            if var.to_lowercase().contains("path") {
+                print_var_val("prepend-path", &var, &path)
+            } else {
+                print_var_val("setenv", &var, &path)
+            }
         }
     }
 }

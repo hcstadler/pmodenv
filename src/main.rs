@@ -81,11 +81,11 @@ fn parse_env(before: &mut BTreeMap<String, String>)
 fn to_canonic(path: &str) -> Result<String, String>
 {
     use std::fs::canonicalize;
-    canonicalize(path).map_or_else(|_| Ok(path.to_string()),
+    canonicalize(path).map_or_else(|_| Ok(path.to_string()),                        // cannot canonicalize
                                    |p| if let Some(s) = p.to_str() {
-                                       Ok(s.to_string())
+                                       Ok(s.to_string())                            // canonicalized path
                                     } else {
-                                        Err(format!("unsupported path: {}", path))
+                                        Err(format!("unsupported path: {}", path))  // path to utf8 conversion fails
                                     })
 }
 
@@ -311,24 +311,26 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
     drops.map(|drops_iter| drops_iter.collect())
 }
 
-fn print_str(s: &str)
+fn print_str(s: &str) -> Result<(), String>
 {
     if s.lines().count() > 1 {
-        panic!("cannot handle multiline output:\n{}", s)
+        return Err(format!("cannot handle multiline output:\n{}", s))
     }
     println!("{}", s);
+    Ok(())
 }
 
-fn print_var(op: &str, var: &str)
+fn print_var(op: &str, var: &str) -> Result<(), String>
 {
-    print_str(&format!("{} {}", op, var));
+    print_str(&format!("{} {}", op, var))
 }
 
-fn print_var_val(op: &str, var: &str, val: &str)
+fn print_var_val(op: &str, var: &str, val: &str) -> Result<(), String>
 {
     if !val.is_empty() {
-        print_str(&format!("{} {} {}", op, var, val))
+        print_str(&format!("{} {} {}", op, var, val))?
     }
+    Ok(())
 }
 
 /// Print module file header
@@ -340,14 +342,17 @@ fn print_var_val(op: &str, var: &str, val: &str)
 /// set PREFIX /home/stadler_h
 /// set BIN bin
 /// ```
-fn print_header(vars: &Option<BTreeMap<&str, &str>>)
+fn print_header(vars: &Option<BTreeMap<&str, &str>>) -> Result<(), String>
 {
     use std::env::args;
     let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
-    print_str(&comment);
+    print_str(&comment)?;
     if let Some(btree) = vars.as_ref() {
-        btree.iter().for_each(|(var, val)| print_var_val("set", var, val))
+        for (var, val) in btree.iter() {
+            print_var_val("set", var, val)?
+        }
     }
+    Ok(())
 }
 
 /// Run the program
@@ -363,7 +368,7 @@ fn run() -> Result<(), String>
     let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var"))?;
     let drops = parse_drops(cli_args.values_of("drop"));
     let check_path = cli_args.is_present("check-path");
-    print_header(&variables);
+    print_header(&variables)?;
 
     let mut before = BTreeMap::new();
     parse_env(&mut before);
@@ -386,14 +391,14 @@ fn run() -> Result<(), String>
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') ^ val_before.ends_with(':') {
-                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)
+                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') ^ val_before.starts_with(':') {
-                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)
+                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
                         }
@@ -402,21 +407,21 @@ fn run() -> Result<(), String>
                         if start_end.len() != 2 {
                             eprintln!("# WARNING: ignoring unexpected change in variable: {}", var)
                         }
-                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?);
-                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?);
+                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?;
+                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?;
                     } else {
                         eprintln!("# WARNING: ignoring unsupported change in variable: {}", var)
                     }
                 }
             } else {
-                print_var("unsetenv", var)
+                print_var("unsetenv", var)?
             }
         } else {
             let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?;
             if var.to_lowercase().contains("path") {
-                print_var_val("prepend-path", var, &path)
+                print_var_val("prepend-path", var, &path)?
             } else {
-                print_var_val("setenv", var, &path)
+                print_var_val("setenv", var, &path)?
             }
         }
     }

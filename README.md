@@ -18,3 +18,7 @@ set PREFIX /home/stadler_h
 setenv HELLO 1
 prepend-path PATH ${PREFIX}/bin
 ```
+
+## Issues
+
+Environment variables are all treated as path style variables. At some point I probably need to do better than that.

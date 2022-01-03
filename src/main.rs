@@ -141,9 +141,9 @@ fn map_path(path: &str,
 fn parse_cli_args<'a>() -> clap::ArgMatches<'a>
 {
     // NOTE: no positional arguments should be defined, as it leads to problems with options accepting multiple values, see clap docu
-    use clap::{Arg, App};
+    use clap::{Arg, App, crate_version};
     App::new("pmodenv")
-        .version("1.0")
+        .version(crate_version!())
         .author("hstadler@protonmail.ch")
         .about("Turns environment differences into a module file
 

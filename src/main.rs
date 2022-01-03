@@ -351,7 +351,7 @@ fn print_header(vars: &Option<BTreeMap<&str, &str>>)
 }
 
 /// Run the program
-fn main()
+fn run() -> Result<(), String>
 {
     use std::env::vars;
     use std::collections::BTreeSet;
@@ -359,8 +359,8 @@ fn main()
     let cli_args = parse_cli_args();
 
     let exceptions = cli_args.values_of("except");
-    let replacements = parse_replacements(cli_args.values_of("replace")).expect("Replacement parsing");
-    let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var")).expect("Variables parsing");
+    let replacements = parse_replacements(cli_args.values_of("replace"))?;
+    let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var"))?;
     let drops = parse_drops(cli_args.values_of("drop"));
     let check_path = cli_args.is_present("check-path");
     print_header(&variables);
@@ -386,14 +386,14 @@ fn main()
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') ^ val_before.ends_with(':') {
-                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"))
+                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') ^ val_before.starts_with(':') {
-                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"))
+                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
                         }
@@ -402,8 +402,8 @@ fn main()
                         if start_end.len() != 2 {
                             eprintln!("# WARNING: ignoring unexpected change in variable: {}", var)
                         }
-                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"));
-                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"));
+                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?);
+                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?);
                     } else {
                         eprintln!("# WARNING: ignoring unsupported change in variable: {}", var)
                     }
@@ -412,12 +412,21 @@ fn main()
                 print_var("unsetenv", var)
             }
         } else {
-            let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping");
+            let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?;
             if var.to_lowercase().contains("path") {
                 print_var_val("prepend-path", var, &path)
             } else {
                 print_var_val("setenv", var, &path)
             }
         }
+    }
+    Ok(())
+}
+
+/// Run program and handle errors
+fn main()
+{
+    if let Err(msg) = run() {
+        eprintln!("Error: {}", msg)
     }
 }

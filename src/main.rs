@@ -78,11 +78,15 @@ fn parse_env(before: &mut BTreeMap<String, String>)
 /// * `path` String slice representing a file system path
 /// # Returns
 /// String containing the canonicalized path. If `path` cannot be canonicalized, it is returned as is.
-fn to_canonic(path: &str) -> String
+fn to_canonic(path: &str) -> Result<String, String>
 {
     use std::fs::canonicalize;
-    canonicalize(path).map_or_else(|_| path.to_string(),
-                                   |p| p.to_str().unwrap_or_else(|| panic!("unsupported path: {}", path)).to_string())
+    canonicalize(path).map_or_else(|_| Ok(path.to_string()),
+                                   |p| if let Some(s) = p.to_str() {
+                                       Ok(s.to_string())
+                                    } else {
+                                        Err(format!("unsupported path: {}", path))
+                                    })
 }
 
 /// Map path components
@@ -105,10 +109,13 @@ fn map_path(path: &str,
             drops: Option<&[&str]>,
             replacements: Option<&[Replacement]>,
             vars: Option<&BTreeMap<&str, &str>>,
-            check_path: bool) -> String
+            check_path: bool) -> Result<String, String>
 {
     use std::path::Path;
-    let mut path_list: Vec<String> = path.trim().split(':').filter(|p| !p.is_empty()).map(to_canonic).collect();
+    let mut path_list = Vec::new();
+    for p in path.trim().split(':').filter(|p| !p.is_empty()) {
+        path_list.push(to_canonic(p)?)
+    }
     if check_path {
         path_list = path_list.into_iter().filter(|p| Path::new(p).exists()).collect()
     }
@@ -124,7 +131,7 @@ fn map_path(path: &str,
             p
         }).collect()
     }
-    path_list.into_iter().fold(String::from(""), |path, p| path + ":" + &p).trim_start_matches(':').to_string()
+    Ok(path_list.into_iter().fold(String::from(""), |path, p| path + ":" + &p).trim_start_matches(':').to_string())
 }
 
 /// Parse commandline arguments
@@ -222,21 +229,30 @@ SECURITY:
 /// * `replacements` Optional iterator over replacement option strings
 /// # Returns
 /// Optional vector of [Replacement] structures
-fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) -> Option<Vec<Replacement<'a>>>
+fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) -> Result<Option<Vec<Replacement<'a>>>, String>
 {
     if let Some(replacements_iter) = replacements {
-        let replacements_list: Vec<Replacement<'a>> = replacements_iter.map(|s| {
-                let mut split = s.splitn(2, ':');
-                let orig: &'a str = split.next().unwrap_or_else(|| panic!("replace error: first part of {}", s));
-                let repl: &'a str = split.next().unwrap_or_else(|| panic!("replace error: second part of {}", s));
-                if orig.is_empty() || repl.is_empty() {
-                    panic!("unsupported replacement for <{}>", orig)
-                }
-                Replacement(orig, repl)
-            }).collect();
-        Some(replacements_list)
+        let mut replacements_list = Vec::new();
+        for s in replacements_iter {
+            let mut split = s.splitn(2, ':');
+            let orig = if let Some(s) = split.next() {
+                s
+            } else {
+                return Err(format!("replace error: first part of {}", s))
+            };
+            let repl = if let Some(s) = split.next() {
+                s
+            } else {
+                return Err(format!("replace error: second part of {}", s))
+            };
+            if orig.is_empty() || repl.is_empty() {
+                return Err(format!("unsupported replacement for <{}>", orig))
+            }
+            replacements_list.push(Replacement(orig, repl));
+        }
+        Ok(Some(replacements_list))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -249,29 +265,36 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
 /// * `vars` Optional iterator over variable substitution strings
 /// # Return
 /// Optional mapping from variable names to variable values
-fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, vars: Option<T>) -> Option<BTreeMap<&'a str, &'a str>>
+fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, vars: Option<T>) -> Result<Option<BTreeMap<&'a str, &'a str>>, String>
 {
-    let mut res = BTreeMap::<&str, &str>::new();
-    prefix.and_then(|v| res.insert(PREFIX_VAR, v));
+    let mut btree = BTreeMap::new();
+    prefix.and_then(|value| btree.insert(PREFIX_VAR, value));
     if let Some(vars_iter) = vars {
-        vars_iter.fold(&mut res, |btree, v| {
+        for v in vars_iter {
             let mut split = v.splitn(2, '=');
-            let var: &'a str = split.next().unwrap_or_else(|| panic!("var error: first part of {}", v));
-            let val: &'a str = split.next().unwrap_or_else(|| panic!("var error: second part of {}", v));
+            let var = if let Some(s) = split.next() {
+                s
+            } else {
+                return Err(format!("var error: first part of {}", v))
+            };
+            let val = if let Some(s) = split.next() {
+                s
+            } else {
+                return Err(format!("var error: second part of {}", v))
+            };
             if var.is_empty() || val.is_empty() {
-                panic!("unsupported variable substitution for <{}>", var)
+                return Err(format!("unsupported variable substitution for <{}>", var))
             }
             if btree.get(var).is_some() {
-                panic!("duplicate definition of variable {}", var)
-            };
+                return Err(format!("duplicate definition of variable {}", var))
+            }
             btree.insert(var, val);
-            btree
-        });
+        }
     }
-    if res.is_empty() {
-        None
+    if btree.is_empty() {
+        Ok(None)
     } else {
-        Some(res)
+        Ok(Some(btree))
     }
 }
 
@@ -336,8 +359,8 @@ fn main()
     let cli_args = parse_cli_args();
 
     let exceptions = cli_args.values_of("except");
-    let replacements = parse_replacements(cli_args.values_of("replace"));
-    let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var"));
+    let replacements = parse_replacements(cli_args.values_of("replace")).expect("Replacement parsing");
+    let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var")).expect("Variables parsing");
     let drops = parse_drops(cli_args.values_of("drop"));
     let check_path = cli_args.is_present("check-path");
     print_header(&variables);
@@ -363,14 +386,14 @@ fn main()
                     if val_after.starts_with(val_before) {
                         let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                         if delta.starts_with(':') ^ val_before.ends_with(':') {
-                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
+                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"))
                         } else {
                             eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') ^ val_before.starts_with(':') {
-                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path))
+                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"))
                         } else {
                             eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
                         }
@@ -379,8 +402,8 @@ fn main()
                         if start_end.len() != 2 {
                             eprintln!("# WARNING: ignoring unexpected change in variable: {}", var)
                         }
-                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path));
-                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path));
+                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"));
+                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping"));
                     } else {
                         eprintln!("# WARNING: ignoring unsupported change in variable: {}", var)
                     }
@@ -389,11 +412,11 @@ fn main()
                 print_var("unsetenv", var)
             }
         } else {
-            let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path);
+            let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path).expect("Path mapping");
             if var.to_lowercase().contains("path") {
-                print_var_val("prepend-path", &var, &path)
+                print_var_val("prepend-path", var, &path)
             } else {
-                print_var_val("setenv", &var, &path)
+                print_var_val("setenv", var, &path)
             }
         }
     }

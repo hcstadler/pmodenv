@@ -19,7 +19,6 @@
 //!     -p, --prefix <PREFIX>         Turns PREFIX into a variable
 //!     -r, --replace <OLD:NEW>...    Replaces OLD path fragment with NEW path fragment
 //!     -s, --var <VAR=VAL>...        Turns VAL into a variable
-//! USAGE:
 //! ```
 //!
 //! # Example
@@ -33,6 +32,7 @@
 //! prepend-path PATH ${NVIDIA_HOME}/bin:${PREFIX}/bin
 //! ```
 
+extern crate ansi_term;
 extern crate clap;
 use std::collections::BTreeMap;
 
@@ -81,11 +81,12 @@ fn parse_env(before: &mut BTreeMap<String, String>)
 fn to_canonic(path: &str) -> Result<String, String>
 {
     use std::fs::canonicalize;
-    canonicalize(path).map_or_else(|_| Ok(path.to_string()),                        // cannot canonicalize
+    use ansi_term::Colour::Cyan;
+    canonicalize(path).map_or_else(|_| Ok(path.to_string()),                                    // cannot canonicalize
                                    |p| if let Some(s) = p.to_str() {
-                                       Ok(s.to_string())                            // canonicalized path
+                                       Ok(s.to_string())                                        // canonicalized path
                                     } else {
-                                        Err(format!("unsupported path: {}", path))  // path to utf8 conversion fails
+                                        Err(format!("unsupported path: {}", Cyan.paint(path)))  // path to utf8 conversion fails
                                     })
 }
 
@@ -231,6 +232,7 @@ SECURITY:
 /// Optional vector of [Replacement] structures
 fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) -> Result<Option<Vec<Replacement<'a>>>, String>
 {
+    use ansi_term::Colour::{Cyan,Yellow};
     if let Some(replacements_iter) = replacements {
         let mut replacements_list = Vec::new();
         for s in replacements_iter {
@@ -238,15 +240,15 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
             let orig = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("replace error: first part of {}", s))
+                return Err(format!("replacement: first part of {}, use OLD:NEW", Cyan.paint(s)))
             };
             let repl = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("replace error: second part of {}", s))
+                return Err(format!("replacement: second part of {}, use OLD:NEW", Cyan.paint(s)))
             };
             if orig.is_empty() || repl.is_empty() {
-                return Err(format!("unsupported replacement for <{}>", orig))
+                return Err(format!("unsupported replacement {}, use OLD:NEW", Yellow.paint(s)))
             }
             replacements_list.push(Replacement(orig, repl));
         }
@@ -267,6 +269,7 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
 /// Optional mapping from variable names to variable values
 fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, vars: Option<T>) -> Result<Option<BTreeMap<&'a str, &'a str>>, String>
 {
+    use ansi_term::Colour::{Cyan,Yellow};
     let mut btree = BTreeMap::new();
     prefix.and_then(|value| btree.insert(PREFIX_VAR, value));
     if let Some(vars_iter) = vars {
@@ -275,18 +278,18 @@ fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, var
             let var = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("var error: first part of {}", v))
+                return Err(format!("variable: first part of {}, use VAR=VALUE", Cyan.paint(v)))
             };
             let val = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("var error: second part of {}", v))
+                return Err(format!("variable: second part of {}, use VAR=VALUE", Cyan.paint(v)))
             };
             if var.is_empty() || val.is_empty() {
-                return Err(format!("unsupported variable substitution for <{}>", var))
+                return Err(format!("variable substitution {}, use VAR=VALUE", Yellow.paint(v)))
             }
             if btree.get(var).is_some() {
-                return Err(format!("duplicate definition of variable {}", var))
+                return Err(format!("duplicate definition of variable {}", Cyan.paint(var)))
             }
             btree.insert(var, val);
         }
@@ -311,20 +314,46 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
     drops.map(|drops_iter| drops_iter.collect())
 }
 
+/// Print one line of output
+///
+/// # Argument
+/// * `s` String representing one output line
+/// # Return
+/// Error if argument *s* represents more than one line
 fn print_str(s: &str) -> Result<(), String>
 {
+    use ansi_term::Colour::Yellow;
     if s.lines().count() > 1 {
-        return Err(format!("cannot handle multiline output:\n{}", s))
+        return Err(format!("cannot handle multiline output:\n{}", Yellow.paint(s)))
     }
     println!("{}", s);
     Ok(())
 }
 
+/// Unary operation on variable
+///
+/// # Argument
+/// * `op` Unary operation name
+/// * `var` Variable name
+/// # Example
+/// ```
+/// unsetenv HELLO
+/// ```
 fn print_var(op: &str, var: &str) -> Result<(), String>
 {
     print_str(&format!("{} {}", op, var))
 }
 
+/// Binary operation on variable
+///
+/// # Argument
+/// * `op` Binary operation name
+/// * `var` Variable name
+/// * `val` Operand
+/// # Example
+/// ```
+/// setenv HELLO 1
+/// ```
 fn print_var_val(op: &str, var: &str, val: &str) -> Result<(), String>
 {
     if !val.is_empty() {
@@ -336,6 +365,9 @@ fn print_var_val(op: &str, var: &str, val: &str) -> Result<(), String>
 /// Print module file header
 ///
 /// The header will specify how the output was produced and define the variables
+///
+/// # Argument
+/// * `vars` Variable substitution map
 /// # Example
 /// ```text
 /// ## produced by: ../target/debug/pmodenv -p /home/stadler_h -v BIN=bin
@@ -360,6 +392,7 @@ fn run() -> Result<(), String>
 {
     use std::env::vars;
     use std::collections::BTreeSet;
+    use ansi_term::Colour::Cyan;
 
     let cli_args = parse_cli_args();
 
@@ -393,24 +426,24 @@ fn run() -> Result<(), String>
                         if delta.starts_with(':') ^ val_before.ends_with(':') {
                             print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?
                         } else {
-                            eprintln!("# WARNING: unsupported path suffix in variable: {}", var)
+                            eprintln!("# WARNING: unsupported path suffix in variable: {}", Cyan.paint(var))
                         }
                     } else if val_after.ends_with(val_before) {
                         let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                         if delta.ends_with(':') ^ val_before.starts_with(':') {
                             print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?
                         } else {
-                            eprintln!("# WARNING: unsupported path prefix in variable: {}", var)
+                            eprintln!("# WARNING: unsupported path prefix in variable: {}", Cyan.paint(var))
                         }
                     } else if val_after.contains(val_before) {
                         let start_end = val_after.split(val_before).collect::<Vec<&str>>();
                         if start_end.len() != 2 {
-                            eprintln!("# WARNING: ignoring unexpected change in variable: {}", var)
+                            eprintln!("# WARNING: ignoring unexpected change in variable: {}", Cyan.paint(var))
                         }
                         print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?;
                         print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?;
                     } else {
-                        eprintln!("# WARNING: ignoring unsupported change in variable: {}", var)
+                        eprintln!("# WARNING: ignoring unsupported change in variable: {}", Cyan.paint(var))
                     }
                 }
             } else {
@@ -431,7 +464,9 @@ fn run() -> Result<(), String>
 /// Run program and handle errors
 fn main()
 {
+    use ansi_term::Colour::Red;
+
     if let Err(msg) = run() {
-        eprintln!("Error: {}", msg)
+        eprintln!("{} {}", Red.paint("error:"), msg)
     }
 }

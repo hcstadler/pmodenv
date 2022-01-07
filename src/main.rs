@@ -42,11 +42,28 @@ use std::collections::BTreeSet;
 /// The path represented by `PREFIX_VAR` can be set using the `--prefix=<path>` commandline option
 const PREFIX_VAR: &str = "PREFIX";
 
+/// Default path separator
+const PATH_SEP: &str = ":";
+
 /// Replacement struct tuple
 ///
 /// The first component is the replaced string, the second the replacement string
 #[derive(Clone, Debug)]
 struct Replacement<'a>(&'a str, &'a str);
+
+/// Transform structure
+///
+/// Contains transformation arguments
+/// * `drops` Drop paths with these fragments
+/// * `replacements` Target and replacement path fragments
+/// * `vars` Variable substitutions
+/// * `check_path` Check for nonaccessible paths
+struct Transform<'a> {
+    drops: Option<&'a [&'a str]>,
+    replacements: Option<&'a [Replacement<'a>]>,
+    vars: Option<&'a BTreeMap<&'a str, &'a str>>,
+    check_path: bool
+}
 
 /// Parse Linux shell environment from `io::stdin`
 ///
@@ -82,7 +99,7 @@ fn parse_env(before: &mut BTreeMap<String, String>)
 /// true if the variable is in the typmap with a nonempty separator
 fn is_path(var: &str, typmap: &BTreeMap<&str, Option<&str>>) -> bool
 {
-    typmap.contains_key(var) && typmap.get(var).is_some()
+    typmap.contains_key(var) && typmap.get(var).unwrap().is_some()
 }
 
 /// Return canonic path
@@ -105,47 +122,41 @@ fn to_canonic(path: &str) -> Result<String, String>
 
 /// Map path components
 ///
-/// The path is assumed to consist of components separated by `:`.
+/// The path is assumed to consist of components separated by `sep`.
 /// Components are first canonicalized using [to_canonic],
 /// then nonexistent components and those matching drop fragments are dropped,
 /// then fragment replacements are applied (in slice element order),
 /// and finally variable values (in cluding prefix) are replaced in random order with `${`VAR`}` (or `${`[PREFIX_VAR]`}`, resp)
 ///
 /// # Argument
-/// * `path` String slice representing a list of file system paths separated by `:`
-/// * `drops` Optional vector of path fragments. Paths containing these will be dropped
-/// * `replacements` Optional vector of path fragment replacements
-/// * `vars` Optional variable to path fragment mapping, including prefix
-/// * `check_path` If true, filter out paths that are not accessible
+/// * `path` String slice representing a list of file system paths separated by `sep`
+/// * `sep` Path separator
+/// * `transform` Transform arguments
 /// # Returns
 /// String containing the mapped path.
-fn map_path(path: &str,
-            drops: Option<&[&str]>,
-            replacements: Option<&[Replacement]>,
-            vars: Option<&BTreeMap<&str, &str>>,
-            check_path: bool) -> Result<String, String>
+fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, String>
 {
     use std::path::Path;
     let mut path_list = Vec::new();
-    for p in path.trim().split(':').filter(|p| !p.is_empty()) {
+    for p in path.trim().split(sep).filter(|p| !p.is_empty()) {
         path_list.push(to_canonic(p)?)
     }
-    if check_path {
+    if transform.check_path {
         path_list = path_list.into_iter().filter(|p| Path::new(p).exists()).collect()
     }
-    if let Some(drop_list) = drops {
+    if let Some(drop_list) = transform.drops {
         path_list = path_list.into_iter().filter(|p| !drop_list.iter().any(|d| p.contains(d))).collect()
     }
-    if let Some(replacement_list) = replacements {
+    if let Some(replacement_list) = transform.replacements {
         path_list = path_list.into_iter().map(|p| replacement_list.iter().fold(p, |path, r| path.replace(r.0, r.1))).collect()
     }
-    if let Some(vars_map) = vars {
+    if let Some(vars_map) = transform.vars {
         path_list = path_list.into_iter().map(|mut p| {
             vars_map.iter().for_each(|(var, val)| p = p.replace(val, &(String::from("${") + var + "}")));
             p
         }).collect()
     }
-    Ok(path_list.into_iter().fold(String::from(""), |path, p| path + ":" + &p).trim_start_matches(':').to_string())
+    Ok(path_list.into_iter().fold(String::from(""), |path, p| path + sep + &p).trim_start_matches(sep).to_string())
 }
 
 /// Parse commandline arguments
@@ -157,8 +168,11 @@ fn parse_cli_args<'a>() -> clap::ArgMatches<'a>
     use clap::{Arg, App, crate_version};
     App::new("pmodenv")
         .version(crate_version!())
-        .author("hstadler@protonmail.ch")
-        .about("Turns environment differences into a module file
+        .author("Author: hstadler@protonmail.ch")
+        .about("Turns environment differences into a module file")
+        .after_help("HEURISTIC:
+  Variables containing PATH, ROOT, HOME, or DIR are assumed to be path variables,
+  unless overridden by the --type option.
 
 EXAMPLE:
   $ cat /proc/self/environ > /tmp/env.txt
@@ -169,11 +183,11 @@ EXAMPLE:
   prepend-path PATH ${PREFIX}/bin
 
 PRECONDITIONS:
-  - Variable names are assumed to be 'nice': no strange characters.
+  - Variable names are assumed to be nice: no strange characters.
   - Path environment variables are assumed to have PATH in their name.
-  - Variable values are assumed to be 'nice' as well.
-  - Paths are assumed to be 'nicely' separated by ':'.
-  - Replacement and variable options are assumed to be 'nice': no nonsense overlaps
+  - Variable values are assumed to be nice as well.
+  - Paths are assumed to be nicely separated by ':' (or SEP).
+  - Replacement and variable options are assumed to be nice: no nonsense overlaps
 
 EXECUTION:
   For path changes
@@ -185,7 +199,7 @@ EXECUTION:
       in random order (optional)
 
 SECURITY:
-  Never use the output without checking it, as some people are not 'nice'.")
+  Never use the output without checking it, as some people are not nice.")
         .arg(Arg::with_name("except")
                 .takes_value(true)
                 .multiple(true)
@@ -369,7 +383,7 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
             if typ == "p" {
                 if let Some(s) = sep {
                     if s.is_empty() {
-                        sep = Some(":")
+                        sep = Some(PATH_SEP)
                     }
                 }
             } else if typ == "n" {
@@ -398,9 +412,14 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
 fn update_vartypes<'a>(typmap: &mut BTreeMap<&'a str, Option<&'a str>>, vars: &BTreeSet<&'a str>)
 {
     for var in vars.iter() {
-        if ! typmap.contains_key(var)
-           && var.to_lowercase().contains("path") {
-               typmap.insert(var, Some(":"));
+        if ! typmap.contains_key(var) {
+            let var_to_lower = var.to_lowercase();
+            for part in ["path", "home", "root", "dir"] {
+                if var_to_lower.contains(part) {
+                    typmap.insert(var, Some(PATH_SEP));
+                    break
+                }
+            }
         }
     }
 }
@@ -478,12 +497,102 @@ fn print_header(vars: &Option<BTreeMap<&str, &str>>) -> Result<(), String>
     Ok(())
 }
 
+/// Handle path environment variable
+///
+/// # Argument
+/// * `var` Variable name
+/// * `sep` Path separator
+/// * `before` Environment before change
+/// * `after` Environment after change
+/// * `drops` Optional vector of path fragments. Paths containing these will be dropped
+/// * `replacements` Optional vector of path fragment replacements
+/// * `vars` Optional variable to path fragment mapping, including prefix
+/// * `check_path` If true, filter out paths that are not accessible
+fn handle_path_var(var: &str,
+                   sep: &str,
+                   before: &BTreeMap<String, String>,
+                   after: &BTreeMap<String, String>,
+                   transform: &Transform) -> Result<(), String>
+ {
+    use ansi_term::Colour::Cyan;
+
+    if before.contains_key(var) {
+        if after.contains_key(var) {
+            let val_before = before.get(var).unwrap().trim();
+            let val_after = after.get(var).unwrap().trim();
+            if val_before != val_after {
+                if val_after.starts_with(val_before) {
+                    let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
+                    if delta.starts_with(sep) ^ val_before.ends_with(sep) {
+                        print_var_val("append-path", var, &map_path(delta, sep, transform)?)?
+                    } else {
+                        eprintln!("# WARNING: unsupported path suffix in variable: {}", Cyan.paint(var))
+                    }
+                } else if val_after.ends_with(val_before) {
+                    let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
+                    if delta.ends_with(sep) ^ val_before.starts_with(sep) {
+                        print_var_val("prepend-path", var, &map_path(delta, sep, transform)?)?
+                    } else {
+                        eprintln!("# WARNING: unsupported path prefix in variable: {}", Cyan.paint(var));
+                        eprintln!("#          before: {}", val_before);
+                        eprintln!("#          after: {}", val_after)
+                    }
+                } else if val_after.contains(val_before) {
+                    let start_end = val_after.split(val_before).collect::<Vec<&str>>();
+                    if start_end.len() != 2 {
+                        eprintln!("# WARNING: ignoring unexpected change in variable: {}", Cyan.paint(var));
+                    }
+                    print_var_val("prepend-path", var, &map_path(start_end[0], sep, transform)?)?;
+                    print_var_val("append-path", var, &map_path(start_end[1], sep, transform)?)?
+                } else {
+                    eprintln!("# WARNING: ignoring unsupported change in path ariable: {}", Cyan.paint(var));
+                    eprintln!("#          before: {}", val_before);
+                    eprintln!("#          after: {}", val_after)
+                }
+            }
+        } else {
+            print_var("unsetenv", var)?
+        }
+    } else {
+        let path = map_path(after.get(var).unwrap(), sep, transform)?;
+        print_var_val("prepend-path", var, &path)?
+    }
+    Ok(())
+}
+
+/// Handle normal environment variable
+///
+/// # Argument
+/// * `var` Variable name
+/// * `before` Environment before change
+/// * `after` Environment after change
+fn handle_normal_var(var: &str,
+                     before: &BTreeMap<String, String>,
+                     after: &BTreeMap<String, String>) -> Result<(), String>
+{
+    use ansi_term::Colour::Cyan;
+
+    if before.contains_key(var) {
+        if after.contains_key(var) {
+            let val_before = before.get(var).unwrap();
+            let val_after = after.get(var).unwrap();
+            if val_before != val_after {
+                eprintln!("# WARNING: ignoring unsupported change in normal variable: {}", Cyan.paint(var));
+                eprintln!("#          before: {}", val_before);
+                eprintln!("#          after: {}", val_after)
+            }
+        } else {
+            print_var("unsetenv", var)?
+        }
+    } else {
+        print_var_val("setenv", var, after.get(var).unwrap())?
+    }
+    Ok(())
+}
+
 /// Run the program
 fn run() -> Result<(), String>
 {
-    use std::env::vars;
-    use ansi_term::Colour::Cyan;
-
     let cli_args = parse_cli_args();
 
     let exceptions = cli_args.values_of("except");
@@ -497,58 +606,29 @@ fn run() -> Result<(), String>
     let mut before = BTreeMap::new();
     parse_env(&mut before);
     let mut after = BTreeMap::new();
-    for (var, val) in vars() {
+    for (var, val) in std::env::vars() {
         after.insert(var, val);
     }
     let vars_before : BTreeSet<&str> = before.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
     let vars_after : BTreeSet<&str> = after.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
-    let mut vars : BTreeSet<&str> = vars_before.union(&vars_after).copied().collect::<BTreeSet<&str>>();
+    let mut vars : BTreeSet<&str> = vars_before.union(&vars_after).cloned().collect::<BTreeSet<&str>>();
     if let Some(list) = exceptions {
         list.for_each(|var| { vars.remove(var); })
     };
     update_vartypes(&mut vartypes, &vars);
+    let transform = Transform {
+        drops: drops.as_deref(),
+        replacements: replacements.as_deref(),
+        vars: variables.as_ref(),
+        check_path
+    };
 
     for var in vars {
-        if vars_before.contains(&var) {
-            if vars_after.contains(&var) {
-                let val_before = before.get(var).unwrap().trim();
-                let val_after = after.get(var).unwrap().trim();
-                if val_before != val_after {
-                    if val_after.starts_with(val_before) {
-                        let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
-                        if delta.starts_with(':') ^ val_before.ends_with(':') {
-                            print_var_val("append-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?
-                        } else {
-                            eprintln!("# WARNING: unsupported path suffix in variable: {}", Cyan.paint(var))
-                        }
-                    } else if val_after.ends_with(val_before) {
-                        let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
-                        if delta.ends_with(':') ^ val_before.starts_with(':') {
-                            print_var_val("prepend-path", var, &map_path(delta, drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?
-                        } else {
-                            eprintln!("# WARNING: unsupported path prefix in variable: {}", Cyan.paint(var))
-                        }
-                    } else if val_after.contains(val_before) {
-                        let start_end = val_after.split(val_before).collect::<Vec<&str>>();
-                        if start_end.len() != 2 {
-                            eprintln!("# WARNING: ignoring unexpected change in variable: {}", Cyan.paint(var))
-                        }
-                        print_var_val("prepend-path", var, &map_path(start_end[0], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?;
-                        print_var_val("append-path", var, &map_path(start_end[1], drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?)?;
-                    } else {
-                        eprintln!("# WARNING: ignoring unsupported change in variable: {}", Cyan.paint(var))
-                    }
-                }
-            } else {
-                print_var("unsetenv", var)?
-            }
+        if is_path(var, &vartypes) {
+            let sep = vartypes.get(var).unwrap().unwrap_or_else(|| panic!("internal error: expected nonempty separator for variable {}", var));
+            handle_path_var(var, sep, &before, &after, &transform)?;
         } else {
-            let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?;
-            if is_path(&var, &vartypes) {
-                print_var_val("prepend-path", var, &path)?
-            } else {
-                print_var_val("setenv", var, &path)?
-            }
+            handle_normal_var(var, &before, &after)?;
         }
     }
     Ok(())

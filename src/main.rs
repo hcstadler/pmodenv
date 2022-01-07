@@ -35,6 +35,7 @@
 extern crate ansi_term;
 extern crate clap;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 /// Name of the prefix variable
 ///
@@ -70,6 +71,18 @@ fn parse_env(before: &mut BTreeMap<String, String>)
             before.insert(var.to_string(), val.to_string());
         }
     }
+}
+
+/// Check if variable is a path
+///
+/// # Argument
+/// * `var` Variable name
+/// * `typmap` Variable name to type map
+/// # Return
+/// true if the variable is in the typmap with a nonempty separator
+fn is_path(var: &str, typmap: &BTreeMap<&str, Option<&str>>) -> bool
+{
+    typmap.contains_key(var) && typmap.get(var).is_some()
 }
 
 /// Return canonic path
@@ -212,6 +225,13 @@ SECURITY:
                 .long("var")
                 .value_name("VAR=VAL")
                 .help("Turns VAL into a variable"))
+        .arg(Arg::with_name("type")
+                .takes_value(true)
+                .multiple(true)
+                .short("t")
+                .long("type")
+                .value_name("VAR:TYPE[:SEP]")
+                .help("Handle VAR as TYPE (p: path, n: normal), for TYPE=p the path separator SEP (default ':') will be used"))
         .arg(Arg::with_name("comment")
                 .takes_value(true)
                 .short("c")
@@ -314,6 +334,77 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
     drops.map(|drops_iter| drops_iter.collect())
 }
 
+/// Parse variable types
+///
+/// Create a variable name to variable type mapping.
+/// The variable type string `var:t:s` will result in
+/// * `"var"→None` for t='n'
+/// * `"var"→Some("separator") for t='p'
+///
+/// # Argument
+/// * `types` Optional iterator over variable type strings
+/// # Return
+/// Potentially empty mapping from variable names to variable types
+fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<BTreeMap<&'a str, Option<&'a str>>, String>
+{
+    use ansi_term::Colour::{Cyan,Yellow};
+    let mut btree = BTreeMap::new();
+    if let Some(types_iter) = types {
+        for v in types_iter {
+            let mut split = v.splitn(3, ':');
+            let var = if let Some(s) = split.next() {
+                s
+            } else {
+                return Err(format!("type: first part of {}, use VAR:TYPE[:SEP]", Cyan.paint(v)))
+            };
+            let typ = if let Some(s) = split.next() {
+                s
+            } else {
+                return Err(format!("type: second part of {}, use VAR:TYPE[:SEP]", Cyan.paint(v)))
+            };
+            let mut sep = split.next();
+            if var.is_empty() || typ.is_empty() {
+                return Err(format!("type {}, use VAR:TYPE[:SEP]", Yellow.paint(v)))
+            }
+            if typ == "p" {
+                if let Some(s) = sep {
+                    if s.is_empty() {
+                        sep = Some(":")
+                    }
+                }
+            } else if typ == "n" {
+                if sep.is_some() {
+                    return Err(format!("type: no separator allowed for {}:n", Cyan.paint(var)))
+                }
+            } else {
+                return Err(format!("type: TYPE {} for variable {} undefined, use one of 'n', 'p'", Yellow.paint(typ), Cyan.paint(var)))
+            }
+            if btree.get(var).is_some() {
+                return Err(format!("duplicate definition of type for variable {}", Cyan.paint(var)))
+            }
+            btree.insert(var, sep);
+        }
+    }
+    Ok(btree)
+}
+
+/// Update type map with unmentioned path variables according to heuristic
+///
+/// If a lowercased variable name contains 'path', it is assumed to be a traditional path variable with separator ':'
+///
+/// # Argument
+/// * `typmap` The variable to type map that will be updated
+/// * `vars` Set of variables to consider
+fn update_vartypes<'a>(typmap: &mut BTreeMap<&'a str, Option<&'a str>>, vars: &BTreeSet<&'a str>)
+{
+    for var in vars.iter() {
+        if ! typmap.contains_key(var)
+           && var.to_lowercase().contains("path") {
+               typmap.insert(var, Some(":"));
+        }
+    }
+}
+
 /// Print one line of output
 ///
 /// # Argument
@@ -391,7 +482,6 @@ fn print_header(vars: &Option<BTreeMap<&str, &str>>) -> Result<(), String>
 fn run() -> Result<(), String>
 {
     use std::env::vars;
-    use std::collections::BTreeSet;
     use ansi_term::Colour::Cyan;
 
     let cli_args = parse_cli_args();
@@ -399,6 +489,7 @@ fn run() -> Result<(), String>
     let exceptions = cli_args.values_of("except");
     let replacements = parse_replacements(cli_args.values_of("replace"))?;
     let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var"))?;
+    let mut vartypes = parse_vartypes(cli_args.values_of("type"))?;
     let drops = parse_drops(cli_args.values_of("drop"));
     let check_path = cli_args.is_present("check-path");
     print_header(&variables)?;
@@ -415,6 +506,8 @@ fn run() -> Result<(), String>
     if let Some(list) = exceptions {
         list.for_each(|var| { vars.remove(var); })
     };
+    update_vartypes(&mut vartypes, &vars);
+
     for var in vars {
         if vars_before.contains(&var) {
             if vars_after.contains(&var) {
@@ -451,7 +544,7 @@ fn run() -> Result<(), String>
             }
         } else {
             let path = map_path(after.get(var).unwrap(), drops.as_deref(), replacements.as_deref(), variables.as_ref(), check_path)?;
-            if var.to_lowercase().contains("path") {
+            if is_path(&var, &vartypes) {
                 print_var_val("prepend-path", var, &path)?
             } else {
                 print_var_val("setenv", var, &path)?

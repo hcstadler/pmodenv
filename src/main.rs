@@ -1,6 +1,8 @@
 #![warn(missing_docs)]
 
-//! Program to produce modulefile lines by looking at Linux shell environment differences
+//! Program to produce modulefile lines by looking at Linux shell environment differences.
+//! Variables containing PATH, ROOT, HOME, or DIR are assumed to be path variables,
+//! unless overridden by the --type option.
 //!
 //! # Call options
 //! ```text
@@ -13,12 +15,14 @@
 //!     -V, --version       Prints version information
 //!
 //! OPTIONS:
-//!     -c, --comment <COMMENT>       Visible in the result
-//!     -d, --drop <FRAGMENT>...      Drop paths containing FRAGMENT
-//!     -e, --except <VAR>...         Ignores the environment variable VAR
-//!     -p, --prefix <PREFIX>         Turns PREFIX into a variable
-//!     -r, --replace <OLD:NEW>...    Replaces OLD path fragment with NEW path fragment
-//!     -s, --var <VAR=VAL>...        Turns VAL into a variable
+//!     -c, --comment <COMMENT>           Visible in the result
+//!     -d, --drop <FRAGMENT>...          Drop paths containing FRAGMENT
+//!     -e, --except <VAR>...             Ignores the environment variable VAR
+//!     -p, --prefix <PREFIX>             Turns PREFIX into a variable
+//!     -r, --replace <OLD:NEW>...        Replaces OLD path fragment with NEW path fragment
+//!     -t, --type <VAR:TYPE[:SEP]>...    Handle VAR as TYPE (p: path, n: normal), for TYPE=p the path separator SEP
+//!                                       (default ':') will be used
+//!     -s, --var <VAR=VAL>...            Turns VAL into a variable
 //! ```
 //!
 //! # Example
@@ -51,7 +55,7 @@ const PATH_SEP: &str = ":";
 #[derive(Clone, Debug)]
 struct Replacement<'a>(&'a str, &'a str);
 
-/// Transform structure
+/// Transform arguments
 ///
 /// Contains transformation arguments
 /// * `drops` Drop paths with these fragments

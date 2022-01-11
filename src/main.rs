@@ -1,7 +1,7 @@
 #![warn(missing_docs)]
 
 //! Program to produce modulefile lines by looking at Linux shell environment differences.
-//! Variables containing PATH, ROOT, HOME, or DIR are assumed to be path variables,
+//! Variables containing PATH, ROOT, HOME, EXE, PREFIX, FILE, or DIR are assumed to be path variables,
 //! unless overridden by the --type option.
 //!
 //! # Call options
@@ -175,7 +175,7 @@ fn parse_cli_args<'a>() -> clap::ArgMatches<'a>
         .author("Author: hstadler@protonmail.ch")
         .about("Turns environment differences into a module file")
         .after_help("HEURISTIC:
-  Variables containing PATH, ROOT, HOME, or DIR are assumed to be path variables,
+  Variables containing PATH, ROOT, HOME, EXE, PREFIX, FILE, or DIR are assumed to be path variables,
   unless overridden by the --type option.
 
 EXAMPLE:
@@ -389,6 +389,8 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
                     if s.is_empty() {
                         sep = Some(PATH_SEP)
                     }
+                } else {
+                    sep = Some(PATH_SEP)
                 }
             } else if typ == "n" {
                 if sep.is_some() {
@@ -418,13 +420,31 @@ fn update_vartypes<'a>(typmap: &mut BTreeMap<&'a str, Option<&'a str>>, vars: &B
     for var in vars.iter() {
         if ! typmap.contains_key(var) {
             let var_to_lower = var.to_lowercase();
-            for part in ["path", "home", "root", "dir"] {
+            for part in ["path", "home", "root", "file", "exe", "prefix", "dir"] {
                 if var_to_lower.contains(part) {
                     typmap.insert(var, Some(PATH_SEP));
                     break
                 }
             }
         }
+    }
+}
+
+/// Convert string to TCL friendly string
+///
+/// If the string contains whitespace, wrap it in "
+/// ***WARNING***: This is very incomplete, TCL has many special chars it interprets!
+///
+/// # Argument
+/// * `s` String
+/// # Return
+/// TCL friendly version of `s`
+fn tclize(s : &str) -> String
+{
+    if s.chars().any(|c| c.is_whitespace()) {
+        String::new() + "\"" + &s.replace("\"", "\\\"") + "\""
+    } else {
+        s.to_string()
     }
 }
 
@@ -468,10 +488,14 @@ fn print_var(op: &str, var: &str) -> Result<(), String>
 /// ```
 /// setenv HELLO 1
 /// ```
-fn print_var_val(op: &str, var: &str, val: &str) -> Result<(), String>
+fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(), String>
 {
     if !val.is_empty() {
-        print_str(&format!("{} {} {}", op, var, val))?
+        print_str(&format!("{} {} {}", op, var, &tclize(val)))?
+    } else if !drop_empty {
+        print_str(&format!("{} {} \"\"", op, var))?
+    } else {
+        eprintln!("# DROPPED: {} {}", op, var);
     }
     Ok(())
 }
@@ -495,7 +519,7 @@ fn print_header(vars: &Option<BTreeMap<&str, &str>>) -> Result<(), String>
     print_str(&comment)?;
     if let Some(btree) = vars.as_ref() {
         for (var, val) in btree.iter() {
-            print_var_val("set", var, val)?
+            print_var_val("set", var, val, true)?
         }
     }
     Ok(())
@@ -528,14 +552,14 @@ fn handle_path_var(var: &str,
                 if val_after.starts_with(val_before) {
                     let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
                     if delta.starts_with(sep) ^ val_before.ends_with(sep) {
-                        print_var_val("append-path", var, &map_path(delta, sep, transform)?)?
+                        print_var_val("append-path", var, &map_path(delta, sep, transform)?, true)?
                     } else {
                         eprintln!("# WARNING: unsupported path suffix in variable: {}", Cyan.paint(var))
                     }
                 } else if val_after.ends_with(val_before) {
                     let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                     if delta.ends_with(sep) ^ val_before.starts_with(sep) {
-                        print_var_val("prepend-path", var, &map_path(delta, sep, transform)?)?
+                        print_var_val("prepend-path", var, &map_path(delta, sep, transform)?, true)?
                     } else {
                         eprintln!("# WARNING: unsupported path prefix in variable: {}", Cyan.paint(var));
                         eprintln!("#          before: {}", val_before);
@@ -546,8 +570,8 @@ fn handle_path_var(var: &str,
                     if start_end.len() != 2 {
                         eprintln!("# WARNING: ignoring unexpected change in variable: {}", Cyan.paint(var));
                     }
-                    print_var_val("prepend-path", var, &map_path(start_end[0], sep, transform)?)?;
-                    print_var_val("append-path", var, &map_path(start_end[1], sep, transform)?)?
+                    print_var_val("prepend-path", var, &map_path(start_end[0], sep, transform)?, true)?;
+                    print_var_val("append-path", var, &map_path(start_end[1], sep, transform)?, true)?
                 } else {
                     eprintln!("# WARNING: ignoring unsupported change in path ariable: {}", Cyan.paint(var));
                     eprintln!("#          before: {}", val_before);
@@ -559,7 +583,7 @@ fn handle_path_var(var: &str,
         }
     } else {
         let path = map_path(after.get(var).unwrap(), sep, transform)?;
-        print_var_val("prepend-path", var, &path)?
+        print_var_val("prepend-path", var, &path, true)?
     }
     Ok(())
 }
@@ -589,7 +613,7 @@ fn handle_normal_var(var: &str,
             print_var("unsetenv", var)?
         }
     } else {
-        print_var_val("setenv", var, after.get(var).unwrap())?
+        print_var_val("setenv", var, after.get(var).unwrap(), false)?
     }
     Ok(())
 }

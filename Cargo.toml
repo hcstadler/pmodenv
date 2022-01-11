@@ -1,6 +1,6 @@
 [package]
 name = "pmodenv"
-version = "0.9.0"
+version = "1.0.0"
 authors = ["Hans-Christian Stadler Kleeb <hans-christian.stadler@psi.ch>"]
 edition = "2018"
 

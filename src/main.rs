@@ -87,9 +87,7 @@ fn parse_env(before: &mut BTreeMap<String, String>)
     io::stdin().read_to_string(&mut env_string).ok().unwrap();
     for part in env_string.split('\0') {
         if part.contains('=') {
-            let mut var_val = part.splitn(2, '=');
-            let var = var_val.next().unwrap();
-            let val = var_val.next().unwrap();
+            let (var, val) = part.split_once('=').unwrap();
             before.insert(var.to_string(), val.to_string());
         }
     }
@@ -280,18 +278,14 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
         for s in replacements_iter {
             let mut split = s.splitn(2, ':');
             let orig = if let Some(s) = split.next() {
+                if s.is_empty() {
+                    return Err(format!("unsupported replacement {}, use OLD:NEW", Yellow.paint(s)))
+                };
                 s
             } else {
                 return Err(format!("replacement: first part of {}, use OLD:NEW", Cyan.paint(s)))
             };
-            let repl = if let Some(s) = split.next() {
-                s
-            } else {
-                return Err(format!("replacement: second part of {}, use OLD:NEW", Cyan.paint(s)))
-            };
-            if orig.is_empty() || repl.is_empty() {
-                return Err(format!("unsupported replacement {}, use OLD:NEW", Yellow.paint(s)))
-            }
+            let repl = split.next().unwrap_or("");
             replacements_list.push(Replacement(orig, repl));
         }
         Ok(Some(replacements_list))
@@ -449,7 +443,7 @@ fn update_vartypes<'a>(typmap: &mut BTreeMap<&'a str, Option<&'a str>>, vars: &B
 fn tclize(s : &str) -> String
 {
     if s.chars().any(|c| c.is_whitespace()) {
-        String::new() + "\"" + &s.replace("\"", "\\\"") + "\""
+        String::new() + "\"" + &s.replace('\"', "\\\"") + "\""
     } else {
         s.to_string()
     }

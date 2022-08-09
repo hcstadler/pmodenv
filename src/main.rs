@@ -62,6 +62,7 @@ struct Replacement<'a>(&'a str, &'a str);
 /// * `replacements` Target and replacement path fragments
 /// * `vars` Variable substitutions
 /// * `check_path` Check for nonaccessible paths
+#[derive(Clone, Debug)]
 struct Transform<'a> {
     drops: Option<&'a [&'a str]>,
     replacements: Option<&'a [Replacement<'a>]>,
@@ -532,10 +533,7 @@ fn print_header(vars: &Option<BTreeMap<&str, &str>>) -> Result<(), String>
 /// * `sep` Path separator
 /// * `before` Environment before change
 /// * `after` Environment after change
-/// * `drops` Optional vector of path fragments. Paths containing these will be dropped
-/// * `replacements` Optional vector of path fragment replacements
-/// * `vars` Optional variable to path fragment mapping, including prefix
-/// * `check_path` If true, filter out paths that are not accessible
+/// * `transform` Transform arguments
 fn handle_path_var(var: &str,
                    sep: &str,
                    before: &BTreeMap<String, String>,

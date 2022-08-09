@@ -142,6 +142,7 @@ fn to_canonic(path: &str) -> Result<String, String>
 fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, String>
 {
     use std::path::Path;
+
     let mut path_list = Vec::new();
     for p in path.trim().split(sep).filter(|p| !p.is_empty()) {
         path_list.push(to_canonic(p)?)
@@ -171,6 +172,7 @@ fn parse_cli_args<'a>() -> clap::ArgMatches<'a>
 {
     // NOTE: no positional arguments should be defined, as it leads to problems with options accepting multiple values, see clap docu
     use clap::{Arg, App, crate_version};
+
     App::new("pmodenv")
         .version(crate_version!())
         .author("Author: hstadler@protonmail.ch")
@@ -272,6 +274,7 @@ SECURITY:
 fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) -> Result<Option<Vec<Replacement<'a>>>, String>
 {
     use ansi_term::Colour::{Cyan,Yellow};
+
     if let Some(replacements_iter) = replacements {
         let mut replacements_list = Vec::new();
         for s in replacements_iter {
@@ -309,6 +312,7 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
 fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, vars: Option<T>) -> Result<Option<BTreeMap<&'a str, &'a str>>, String>
 {
     use ansi_term::Colour::{Cyan,Yellow};
+
     let mut btree = BTreeMap::new();
     prefix.and_then(|value| btree.insert(PREFIX_VAR, value));
     if let Some(vars_iter) = vars {
@@ -367,6 +371,7 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
 fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<BTreeMap<&'a str, Option<&'a str>>, String>
 {
     use ansi_term::Colour::{Cyan,Yellow};
+
     let mut btree = BTreeMap::new();
     if let Some(types_iter) = types {
         for v in types_iter {
@@ -411,7 +416,8 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
 
 /// Update type map with unmentioned path variables according to heuristic
 ///
-/// If a lowercased variable name contains 'path', it is assumed to be a traditional path variable with separator ':'
+/// If a lowercased variable name contains 'path', 'home', 'root', 'file', 'exe', 'prefix', 'dir',
+/// it is assumed to be a traditional path variable with separator ':'
 ///
 /// # Argument
 /// * `typmap` The variable to type map that will be updated
@@ -491,12 +497,14 @@ fn print_var(op: &str, var: &str) -> Result<(), String>
 /// ```
 fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(), String>
 {
+    use ansi_term::Colour::Cyan;
+
     if !val.is_empty() {
         print_str(&format!("{} {} {}", op, var, &tclize(val)))?
     } else if !drop_empty {
         print_str(&format!("{} {} \"\"", op, var))?
     } else {
-        eprintln!("# DROPPED: {} {}", op, var);
+        eprintln!("# DROPPED: {} {}", op, Cyan.paint(var));
     }
     Ok(())
 }
@@ -516,6 +524,7 @@ fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(),
 fn print_header(vars: &Option<BTreeMap<&str, &str>>) -> Result<(), String>
 {
     use std::env::args;
+
     let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
     print_str(&comment)?;
     if let Some(btree) = vars.as_ref() {
@@ -539,7 +548,7 @@ fn handle_path_var(var: &str,
                    before: &BTreeMap<String, String>,
                    after: &BTreeMap<String, String>,
                    transform: &Transform) -> Result<(), String>
- {
+{
     use ansi_term::Colour::Cyan;
 
     if before.contains_key(var) {

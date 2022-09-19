@@ -36,7 +36,7 @@
 //! prepend-path PATH ${NVIDIA_HOME}/bin:${PREFIX}/bin
 //! ```
 
-extern crate ansi_term;
+extern crate console;
 extern crate clap;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -68,6 +68,39 @@ struct Transform<'a> {
     replacements: Option<&'a [Replacement<'a>]>,
     vars: Option<&'a BTreeMap<&'a str, &'a str>>,
     check_path: bool
+}
+
+/// Render text in cyan color on the console
+///
+/// # Argument
+/// `text` Text to render in cyan color
+/// #Return:
+/// Console printable object
+fn cyan<D>(text: D) -> console::StyledObject<D>
+{
+    return console::style(text).cyan();
+}
+
+/// Render text in yellow color on the console
+///
+/// # Argument
+/// `text` Text to render in cyan color
+/// #Return:
+/// Console printable object
+fn yellow<D>(text: D) -> console::StyledObject<D>
+{
+    return console::style(text).yellow();
+}
+
+/// Render text in red color on the console
+///
+/// # Argument
+/// `text` Text to render in cyan color
+/// #Return:
+/// Console printable object
+fn red<D>(text: D) -> console::StyledObject<D>
+{
+    return console::style(text).red();
 }
 
 /// Parse Linux shell environment from `io::stdin`
@@ -114,12 +147,12 @@ fn is_path(var: &str, typmap: &BTreeMap<&str, Option<&str>>) -> bool
 fn to_canonic(path: &str) -> Result<String, String>
 {
     use std::fs::canonicalize;
-    use ansi_term::Colour::Cyan;
+
     canonicalize(path).map_or_else(|_| Ok(path.to_string()),                                    // cannot canonicalize
                                    |p| if let Some(s) = p.to_str() {
                                        Ok(s.to_string())                                        // canonicalized path
                                     } else {
-                                        Err(format!("unsupported path: {}", Cyan.paint(path)))  // path to utf8 conversion fails
+                                        Err(format!("unsupported path: {}", cyan(path)))        // path to utf8 conversion fails
                                     })
 }
 
@@ -271,19 +304,17 @@ SECURITY:
 /// Optional vector of [Replacement] structures
 fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) -> Result<Option<Vec<Replacement<'a>>>, String>
 {
-    use ansi_term::Colour::{Cyan,Yellow};
-
     if let Some(replacements_iter) = replacements {
         let mut replacements_list = Vec::new();
-        for s in replacements_iter {
-            let mut split = s.splitn(2, ':');
+        for r in replacements_iter {
+            let mut split = r.splitn(2, ':');
             let orig = if let Some(s) = split.next() {
                 if s.is_empty() {
-                    return Err(format!("unsupported replacement {}, use OLD:NEW", Yellow.paint(s)))
+                    return Err(format!("unsupported replacement {}, use OLD:NEW", yellow(r)))
                 };
                 s
             } else {
-                return Err(format!("replacement: first part of {}, use OLD:NEW", Cyan.paint(s)))
+                return Err(format!("replacement: first part of {}, use OLD:NEW", cyan(r)))
             };
             let repl = split.next().unwrap_or("");
             replacements_list.push(Replacement(orig, repl));
@@ -305,8 +336,6 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
 /// Optional mapping from variable names to variable values
 fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, vars: Option<T>) -> Result<Option<BTreeMap<&'a str, &'a str>>, String>
 {
-    use ansi_term::Colour::{Cyan,Yellow};
-
     let mut btree = BTreeMap::new();
     prefix.and_then(|value| btree.insert(PREFIX_VAR, value));
     if let Some(vars_iter) = vars {
@@ -315,18 +344,18 @@ fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, var
             let var = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("variable: first part of {}, use VAR=VALUE", Cyan.paint(v)))
+                return Err(format!("variable: first part of {}, use VAR=VALUE", cyan(v)))
             };
             let val = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("variable: second part of {}, use VAR=VALUE", Cyan.paint(v)))
+                return Err(format!("variable: second part of {}, use VAR=VALUE", cyan(v)))
             };
             if var.is_empty() || val.is_empty() {
-                return Err(format!("variable substitution {}, use VAR=VALUE", Yellow.paint(v)))
+                return Err(format!("variable substitution {}, use VAR=VALUE", yellow(v)))
             }
             if btree.get(var).is_some() {
-                return Err(format!("duplicate definition of variable {}", Cyan.paint(var)))
+                return Err(format!("duplicate definition of variable {}", cyan(var)))
             }
             btree.insert(var, val);
         }
@@ -364,8 +393,6 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
 /// Potentially empty mapping from variable names to variable types
 fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<BTreeMap<&'a str, Option<&'a str>>, String>
 {
-    use ansi_term::Colour::{Cyan,Yellow};
-
     let mut btree = BTreeMap::new();
     if let Some(types_iter) = types {
         for v in types_iter {
@@ -373,16 +400,16 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
             let var = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("type: first part of {}, use VAR:TYPE[:SEP]", Cyan.paint(v)))
+                return Err(format!("type: first part of {}, use VAR:TYPE[:SEP]", cyan(v)))
             };
             let typ = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("type: second part of {}, use VAR:TYPE[:SEP]", Cyan.paint(v)))
+                return Err(format!("type: second part of {}, use VAR:TYPE[:SEP]", cyan(v)))
             };
             let mut sep = split.next();
             if var.is_empty() || typ.is_empty() {
-                return Err(format!("type {}, use VAR:TYPE[:SEP]", Yellow.paint(v)))
+                return Err(format!("type {}, use VAR:TYPE[:SEP]", yellow(v)))
             }
             if typ == "p" {
                 if let Some(s) = sep {
@@ -394,13 +421,13 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
                 }
             } else if typ == "n" {
                 if sep.is_some() {
-                    return Err(format!("type: no separator allowed for {}:n", Cyan.paint(var)))
+                    return Err(format!("type: no separator allowed for {}:n", cyan(var)))
                 }
             } else {
-                return Err(format!("type: TYPE {} for variable {} undefined, use one of 'n', 'p'", Yellow.paint(typ), Cyan.paint(var)))
+                return Err(format!("type: TYPE {} for variable {} undefined, use one of 'n', 'p'", yellow(typ), cyan(var)))
             }
             if btree.get(var).is_some() {
-                return Err(format!("duplicate definition of type for variable {}", Cyan.paint(var)))
+                return Err(format!("duplicate definition of type for variable {}", cyan(var)))
             }
             btree.insert(var, sep);
         }
@@ -457,9 +484,8 @@ fn tclize(s : &str) -> String
 /// Error if argument *s* represents more than one line
 fn print_str(s: &str) -> Result<(), String>
 {
-    use ansi_term::Colour::Yellow;
     if s.lines().count() > 1 {
-        return Err(format!("cannot handle multiline output:\n{}", Yellow.paint(s)))
+        return Err(format!("cannot handle multiline output:\n{}", yellow(s)))
     }
     println!("{}", s);
     Ok(())
@@ -491,14 +517,12 @@ fn print_var(op: &str, var: &str) -> Result<(), String>
 /// ```
 fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(), String>
 {
-    use ansi_term::Colour::Cyan;
-
     if !val.is_empty() {
         print_str(&format!("{} {} {}", op, var, &tclize(val)))?
     } else if !drop_empty {
         print_str(&format!("{} {} \"\"", op, var))?
     } else {
-        eprintln!("# DROPPED: {} {}", op, Cyan.paint(var));
+        eprintln!("# DROPPED: {} {}", op, cyan(var));
     }
     Ok(())
 }
@@ -543,8 +567,6 @@ fn handle_path_var(var: &str,
                    after: &BTreeMap<String, String>,
                    transform: &Transform) -> Result<(), String>
 {
-    use ansi_term::Colour::Cyan;
-
     if before.contains_key(var) {
         if after.contains_key(var) {
             let val_before = before.get(var).unwrap().trim();
@@ -555,26 +577,26 @@ fn handle_path_var(var: &str,
                     if delta.starts_with(sep) ^ val_before.ends_with(sep) {
                         print_var_val("append-path", var, &map_path(delta, sep, transform)?, true)?
                     } else {
-                        eprintln!("# WARNING: unsupported path suffix in variable: {}", Cyan.paint(var))
+                        eprintln!("# WARNING: unsupported path suffix in variable: {}", cyan(var))
                     }
                 } else if val_after.ends_with(val_before) {
                     let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
                     if delta.ends_with(sep) ^ val_before.starts_with(sep) {
                         print_var_val("prepend-path", var, &map_path(delta, sep, transform)?, true)?
                     } else {
-                        eprintln!("# WARNING: unsupported path prefix in variable: {}", Cyan.paint(var));
+                        eprintln!("# WARNING: unsupported path prefix in variable: {}", cyan(var));
                         eprintln!("#          before: {}", val_before);
                         eprintln!("#          after: {}", val_after)
                     }
                 } else if val_after.contains(val_before) {
                     let start_end = val_after.split(val_before).collect::<Vec<&str>>();
                     if start_end.len() != 2 {
-                        eprintln!("# WARNING: ignoring unexpected change in variable: {}", Cyan.paint(var));
+                        eprintln!("# WARNING: ignoring unexpected change in variable: {}", cyan(var));
                     }
                     print_var_val("prepend-path", var, &map_path(start_end[0], sep, transform)?, true)?;
                     print_var_val("append-path", var, &map_path(start_end[1], sep, transform)?, true)?
                 } else {
-                    eprintln!("# WARNING: ignoring unsupported change in path ariable: {}", Cyan.paint(var));
+                    eprintln!("# WARNING: ignoring unsupported change in path ariable: {}", cyan(var));
                     eprintln!("#          before: {}", val_before);
                     eprintln!("#          after: {}", val_after)
                 }
@@ -599,14 +621,12 @@ fn handle_normal_var(var: &str,
                      before: &BTreeMap<String, String>,
                      after: &BTreeMap<String, String>) -> Result<(), String>
 {
-    use ansi_term::Colour::Cyan;
-
     if before.contains_key(var) {
         if after.contains_key(var) {
             let val_before = before.get(var).unwrap();
             let val_after = after.get(var).unwrap();
             if val_before != val_after {
-                eprintln!("# WARNING: ignoring unsupported change in normal variable: {}", Cyan.paint(var));
+                eprintln!("# WARNING: ignoring unsupported change in normal variable: {}", cyan(var));
                 eprintln!("#          before: {}", val_before);
                 eprintln!("#          after: {}", val_after)
             }
@@ -666,9 +686,7 @@ fn run() -> Result<(), String>
 /// Run program and handle errors
 fn main()
 {
-    use ansi_term::Colour::Red;
-
     if let Err(msg) = run() {
-        eprintln!("{} {}", Red.paint("error:"), msg)
+        eprintln!("{} {}", red("error:"), msg)
     }
 }

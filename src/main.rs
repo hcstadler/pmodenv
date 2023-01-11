@@ -38,6 +38,7 @@
 
 extern crate console;
 extern crate clap;
+use clap::{Parser,crate_name,crate_authors,crate_version,crate_description};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -49,11 +50,69 @@ const PREFIX_VAR: &str = "PREFIX";
 /// Default path separator
 const PATH_SEP: &str = ":";
 
+/// Commandline arguments
+#[derive(Parser, Debug)]
+#[command(name = crate_name!(),
+          author = crate_authors!(),
+          version = crate_version!(),
+          about = crate_description!(),
+          long_about = None,
+          after_help =
+"HEURISTIC:
+    Variables containing PATH, ROOT, HOME, EXE, PREFIX, FILE, or DIR are assumed to be path variables,
+    unless overridden by the --type option.
+
+EXAMPLE:
+    $ cat /proc/self/environ > /tmp/env.txt
+    $ PATH=${HOME}/bin:${PATH} HELLO=1 pmodenv -p ${HOME} -e _ < /tmp/env.txt
+    # produced by: pmodenv -p /home/stadler_h -e _
+    set PREFIX /home/stadler_h
+    setenv HELLO 1
+    prepend-path PATH ${PREFIX}/bin
+
+PRECONDITIONS:
+    - Variable names are assumed to be nice: no strange characters.
+    - Path environment variables are assumed to have PATH in their name.
+    - Variable values are assumed to be nice as well.
+    - Paths are assumed to be nicely separated by ':' (or SEP).
+    - Replacement and variable options are assumed to be nice: no nonsense overlaps
+
+EXECUTION:
+    For path changes
+    1 - Canonicalize components in the change
+    2 - Drop components that cannot be accessed (optional)
+    3 - Drop components containing drop option fragments (optional)
+    4 - Apply fragment replacements to components in the order given on the commandline (optional)
+    5 - Substitute variable value fragments of the components with the variables (including PREFIX)
+        in random order (optional)
+
+SECURITY:
+    Never use the output without checking it, as some people are not nice."
+)]
+struct Args {
+    #[arg(short='e', value_name = "VAR", help = "Ignores the environment variable VAR")]
+    except: Vec<String>,
+    #[arg(short = 'r', value_name = "OLD:NEW", help = "Replaces OLD path fragment with NEW path fragment")]
+    replace: Vec<String>,
+    #[arg(short = 'd', value_name= "FRAGMENT", help = "Drop paths containing FRAGMENT")]
+    drop: Vec<String>,
+    #[arg(short = 'x', help = "Only keep path components that are accessible by current user on the local machine")]
+    check_path: bool,
+    #[arg(short = 'p', help = "Turns PREFIX into a variable")]
+    prefix: Option<String>,
+    #[arg(short = 's', value_name = "VAR=VAL", help = "Turns VAL into a variable")]
+    var: Vec<String>,
+    #[arg(id = "type", short = 't', value_name = "VAR:TYPE[:SEP]", help = "Handle VAR as TYPE (p: path, n: normal), for TYPE=p the path separator SEP (default ':') will be used")]
+    typ: Vec<String>,
+    #[arg(short = 'c', help = "Visible in the result")]
+    comment: Option<String>,
+}
+
 /// Replacement struct tuple
 ///
 /// The first component is the replaced string, the second the replacement string
 #[derive(Clone, Debug)]
-struct Replacement<'a>(&'a str, &'a str);
+struct Replacement(String, String);
 
 /// Transform arguments
 ///
@@ -64,9 +123,9 @@ struct Replacement<'a>(&'a str, &'a str);
 /// * `check_path` Check for nonaccessible paths
 #[derive(Clone, Debug)]
 struct Transform<'a> {
-    drops: Option<&'a [&'a str]>,
-    replacements: Option<&'a [Replacement<'a>]>,
-    vars: Option<&'a BTreeMap<&'a str, &'a str>>,
+    drops: &'a [String],
+    replacements: &'a [Replacement],
+    vars: &'a BTreeMap<String, String>,
     check_path: bool
 }
 
@@ -78,7 +137,7 @@ struct Transform<'a> {
 /// Console printable object
 fn cyan<D>(text: D) -> console::StyledObject<D>
 {
-    return console::style(text).cyan();
+    console::style(text).cyan()
 }
 
 /// Render text in yellow color on the console
@@ -89,7 +148,7 @@ fn cyan<D>(text: D) -> console::StyledObject<D>
 /// Console printable object
 fn yellow<D>(text: D) -> console::StyledObject<D>
 {
-    return console::style(text).yellow();
+    console::style(text).yellow()
 }
 
 /// Render text in red color on the console
@@ -100,7 +159,7 @@ fn yellow<D>(text: D) -> console::StyledObject<D>
 /// Console printable object
 fn red<D>(text: D) -> console::StyledObject<D>
 {
-    return console::style(text).red();
+    console::style(text).red()
 }
 
 /// Parse Linux shell environment from `io::stdin`
@@ -133,7 +192,7 @@ fn parse_env(before: &mut BTreeMap<String, String>)
 /// * `typmap` Variable name to type map
 /// # Return
 /// true if the variable is in the typmap with a nonempty separator
-fn is_path(var: &str, typmap: &BTreeMap<&str, Option<&str>>) -> bool
+fn is_path(var: &str, typmap: &BTreeMap<String, Option<String>>) -> bool
 {
     typmap.contains_key(var) && typmap.get(var).unwrap().is_some()
 }
@@ -179,118 +238,21 @@ fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, Stri
         path_list.push(to_canonic(p)?)
     }
     if transform.check_path {
-        path_list = path_list.into_iter().filter(|p| Path::new(p).exists()).collect()
+        path_list.retain(|p| Path::new(p).exists())
     }
-    if let Some(drop_list) = transform.drops {
-        path_list = path_list.into_iter().filter(|p| !drop_list.iter().any(|d| p.contains(d))).collect()
+    if ! transform.drops.is_empty() {
+        path_list.retain(|p| !transform.drops.iter().any(|d| p.contains(d)))
     }
-    if let Some(replacement_list) = transform.replacements {
-        path_list = path_list.into_iter().map(|p| replacement_list.iter().fold(p, |path, r| path.replace(r.0, r.1))).collect()
+    if ! transform.replacements.is_empty() {
+        path_list = path_list.into_iter().map(|p| transform.replacements.iter().fold(p, |path, r| path.replace(&r.0, &r.1))).collect()
     }
-    if let Some(vars_map) = transform.vars {
+    if ! transform.vars.is_empty() {
         path_list = path_list.into_iter().map(|mut p| {
-            vars_map.iter().for_each(|(var, val)| p = p.replace(val, &(String::from("${") + var + "}")));
+            transform.vars.iter().for_each(|(var, val)| p = p.replace(val, &(String::from("${") + var + "}")));
             p
         }).collect()
     }
     Ok(path_list.into_iter().fold(String::from(""), |path, p| path + sep + &p).trim_start_matches(sep).to_string())
-}
-
-/// Parse commandline arguments
-/// # Return
-/// [clap::ArgMatches] object
-fn parse_cli_args<'a>() -> clap::ArgMatches<'a>
-{
-    // NOTE: no positional arguments should be defined, as it leads to problems with options accepting multiple values, see clap docu
-    use clap::{Arg, App, crate_version};
-
-    App::new("pmodenv")
-        .version(crate_version!())
-        .author("Author: hstadler@protonmail.ch")
-        .about("Turns environment differences into a module file")
-        .after_help("HEURISTIC:
-  Variables containing PATH, ROOT, HOME, EXE, PREFIX, FILE, or DIR are assumed to be path variables,
-  unless overridden by the --type option.
-
-EXAMPLE:
-  $ cat /proc/self/environ > /tmp/env.txt
-  $ PATH=${HOME}/bin:${PATH} HELLO=1 ../target/debug/pmodenv -p ${HOME} -e _ < /tmp/env.txt
-  # produced by: ../target/debug/pmodenv -p /home/stadler_h -e _
-  set PREFIX /home/stadler_h
-  setenv HELLO 1
-  prepend-path PATH ${PREFIX}/bin
-
-PRECONDITIONS:
-  - Variable names are assumed to be nice: no strange characters.
-  - Path environment variables are assumed to have PATH in their name.
-  - Variable values are assumed to be nice as well.
-  - Paths are assumed to be nicely separated by ':' (or SEP).
-  - Replacement and variable options are assumed to be nice: no nonsense overlaps
-
-EXECUTION:
-  For path changes
-  1 - Canonicalize components in the change
-  2 - Drop components that cannot be accessed (optional)
-  3 - Drop components containing drop option fragments (optional)
-  4 - Apply fragment replacements to components in the order given on the commandline (optional)
-  5 - Substitute variable value fragments of the components with the variables (including PREFIX)
-      in random order (optional)
-
-SECURITY:
-  Never use the output without checking it, as some people are not nice.")
-        .arg(Arg::with_name("except")
-                .takes_value(true)
-                .multiple(true)
-                .short("e")
-                .long("except")
-                .value_name("VAR")
-                .help("Ignores the environment variable VAR"))
-        .arg(Arg::with_name("replace")
-                .takes_value(true)
-                .multiple(true)
-                .short("r")
-                .long("replace")
-                .value_name("OLD:NEW")
-                .help("Replaces OLD path fragment with NEW path fragment"))
-        .arg(Arg::with_name("drop")
-                .takes_value(true)
-                .multiple(true)
-                .short("d")
-                .long("drop")
-                .value_name("FRAGMENT")
-                .help("Drop paths containing FRAGMENT"))
-        .arg(Arg::with_name("check-path")
-                .takes_value(false)
-                .short("x")
-                .long("check-path")
-                .help("Only keep path components that are accessible by current user on the local machine"))
-        .arg(Arg::with_name("prefix")
-                .takes_value(true)
-                .short("p")
-                .long("prefix")
-                .value_name("PREFIX")
-                .help("Turns PREFIX into a variable"))
-        .arg(Arg::with_name("var")
-                .takes_value(true)
-                .multiple(true)
-                .short("s")
-                .long("var")
-                .value_name("VAR=VAL")
-                .help("Turns VAL into a variable"))
-        .arg(Arg::with_name("type")
-                .takes_value(true)
-                .multiple(true)
-                .short("t")
-                .long("type")
-                .value_name("VAR:TYPE[:SEP]")
-                .help("Handle VAR as TYPE (p: path, n: normal), for TYPE=p the path separator SEP (default ':') will be used"))
-        .arg(Arg::with_name("comment")
-                .takes_value(true)
-                .short("c")
-                .long("comment")
-                .value_name("COMMENT")
-                .help("Visible in the result"))
-        .get_matches()
 }
 
 /// Parse replacement arguments
@@ -302,11 +264,11 @@ SECURITY:
 /// * `replacements` Optional iterator over replacement option strings
 /// # Returns
 /// Optional vector of [Replacement] structures
-fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) -> Result<Option<Vec<Replacement<'a>>>, String>
+fn parse_replacements(replacements: Vec<String>) -> Result<Vec<Replacement>, String>
 {
-    if let Some(replacements_iter) = replacements {
-        let mut replacements_list = Vec::new();
-        for r in replacements_iter {
+    let mut replacements_list = Vec::new();
+    if ! replacements.is_empty() {
+        for r in replacements {
             let mut split = r.splitn(2, ':');
             let orig = if let Some(s) = split.next() {
                 if s.is_empty() {
@@ -317,12 +279,10 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
                 return Err(format!("replacement: first part of {}, use OLD:NEW", cyan(r)))
             };
             let repl = split.next().unwrap_or("");
-            replacements_list.push(Replacement(orig, repl));
+            replacements_list.push(Replacement(orig.to_string(), repl.to_string()));
         }
-        Ok(Some(replacements_list))
-    } else {
-        Ok(None)
     }
+    Ok(replacements_list)
 }
 
 /// Parse variable substitutions
@@ -334,12 +294,12 @@ fn parse_replacements<'a, T: Iterator<Item = &'a str>>(replacements: Option<T>) 
 /// * `vars` Optional iterator over variable substitution strings
 /// # Return
 /// Optional mapping from variable names to variable values
-fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, vars: Option<T>) -> Result<Option<BTreeMap<&'a str, &'a str>>, String>
+fn parse_variables(prefix: Option<String>, vars: Vec<String>) -> Result<BTreeMap<String, String>, String>
 {
     let mut btree = BTreeMap::new();
-    prefix.and_then(|value| btree.insert(PREFIX_VAR, value));
-    if let Some(vars_iter) = vars {
-        for v in vars_iter {
+    prefix.and_then(|value| btree.insert(PREFIX_VAR.to_string(), value));
+    if ! vars.is_empty() {
+        for v in vars {
             let mut split = v.splitn(2, '=');
             let var = if let Some(s) = split.next() {
                 s
@@ -357,27 +317,10 @@ fn parse_variables<'a, T: Iterator<Item = &'a str>>(prefix: Option<&'a str>, var
             if btree.get(var).is_some() {
                 return Err(format!("duplicate definition of variable {}", cyan(var)))
             }
-            btree.insert(var, val);
+            btree.insert(var.to_string(), val.to_string());
         }
     }
-    if btree.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(btree))
-    }
-}
-
-/// Parse path drop fragments
-///
-/// Create a vector of path drop fragments.
-///
-/// # Argument
-/// * `drops` Optional iterator over path drop fragments
-/// # Return
-/// Optional vector of path drop fragments
-fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<&'a str>>
-{
-    drops.map(|drops_iter| drops_iter.collect())
+    Ok(btree)
 }
 
 /// Parse variable types
@@ -391,11 +334,11 @@ fn parse_drops<'a, T: Iterator<Item = &'a str>>(drops: Option<T>) -> Option<Vec<
 /// * `types` Optional iterator over variable type strings
 /// # Return
 /// Potentially empty mapping from variable names to variable types
-fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<BTreeMap<&'a str, Option<&'a str>>, String>
+fn parse_vartypes(types: Vec<String>) -> Result<BTreeMap<String, Option<String>>, String>
 {
     let mut btree = BTreeMap::new();
-    if let Some(types_iter) = types {
-        for v in types_iter {
+    if ! types.is_empty() {
+        for v in types {
             let mut split = v.splitn(3, ':');
             let var = if let Some(s) = split.next() {
                 s
@@ -429,7 +372,7 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
             if btree.get(var).is_some() {
                 return Err(format!("duplicate definition of type for variable {}", cyan(var)))
             }
-            btree.insert(var, sep);
+            btree.insert(var.to_string(), sep.map(|s| s.to_string()));
         }
     }
     Ok(btree)
@@ -443,14 +386,14 @@ fn parse_vartypes<'a, T: Iterator<Item = &'a str>>(types: Option<T>) -> Result<B
 /// # Argument
 /// * `typmap` The variable to type map that will be updated
 /// * `vars` Set of variables to consider
-fn update_vartypes<'a>(typmap: &mut BTreeMap<&'a str, Option<&'a str>>, vars: &BTreeSet<&'a str>)
+fn update_vartypes<'a>(typmap: &mut BTreeMap<String, Option<String>>, vars: &BTreeSet<&'a str>)
 {
     for var in vars.iter() {
-        if ! typmap.contains_key(var) {
+        if ! typmap.contains_key(&var.to_string()) {
             let var_to_lower = var.to_lowercase();
             for part in ["path", "home", "root", "file", "exe", "prefix", "dir"] {
                 if var_to_lower.contains(part) {
-                    typmap.insert(var, Some(PATH_SEP));
+                    typmap.insert(var.to_string(), Some(PATH_SEP.to_string()));
                     break
                 }
             }
@@ -539,16 +482,14 @@ fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(),
 /// set PREFIX /home/stadler_h
 /// set BIN bin
 /// ```
-fn print_header(vars: &Option<BTreeMap<&str, &str>>) -> Result<(), String>
+fn print_header(vars: &BTreeMap<String, String>) -> Result<(), String>
 {
     use std::env::args;
 
     let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
     print_str(&comment)?;
-    if let Some(btree) = vars.as_ref() {
-        for (var, val) in btree.iter() {
-            print_var_val("set", var, val, true)?
-        }
+    for (var, val) in vars.iter() {
+        print_var_val("set", var, val, true)?
     }
     Ok(())
 }
@@ -642,14 +583,14 @@ fn handle_normal_var(var: &str,
 /// Run the program
 fn run() -> Result<(), String>
 {
-    let cli_args = parse_cli_args();
+    let cli_args = Args::parse();
 
-    let exceptions = cli_args.values_of("except");
-    let replacements = parse_replacements(cli_args.values_of("replace"))?;
-    let variables = parse_variables(cli_args.value_of("prefix"), cli_args.values_of("var"))?;
-    let mut vartypes = parse_vartypes(cli_args.values_of("type"))?;
-    let drops = parse_drops(cli_args.values_of("drop"));
-    let check_path = cli_args.is_present("check-path");
+    let exceptions = cli_args.except;
+    let replacements = parse_replacements(cli_args.replace)?;
+    let variables = parse_variables(cli_args.prefix, cli_args.var)?;
+    let mut vartypes = parse_vartypes(cli_args.typ)?;
+    let drops = cli_args.drop;
+    let check_path = cli_args.check_path;
     print_header(&variables)?;
 
     let mut before = BTreeMap::new();
@@ -661,20 +602,18 @@ fn run() -> Result<(), String>
     let vars_before : BTreeSet<&str> = before.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
     let vars_after : BTreeSet<&str> = after.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
     let mut vars : BTreeSet<&str> = vars_before.union(&vars_after).cloned().collect::<BTreeSet<&str>>();
-    if let Some(list) = exceptions {
-        list.for_each(|var| { vars.remove(var); })
-    };
+    exceptions.into_iter().for_each(|var| { vars.remove(var.as_str()); });
     update_vartypes(&mut vartypes, &vars);
     let transform = Transform {
-        drops: drops.as_deref(),
-        replacements: replacements.as_deref(),
-        vars: variables.as_ref(),
+        drops: drops.as_slice(),
+        replacements: &replacements,
+        vars: &variables,
         check_path
     };
 
     for var in vars {
         if is_path(var, &vartypes) {
-            let sep = vartypes.get(var).unwrap().unwrap_or_else(|| panic!("internal error: expected nonempty separator for variable {}", var));
+            let sep = vartypes.get(var).unwrap().as_ref().unwrap_or_else(|| panic!("internal error: expected nonempty separator for variable {}", var));
             handle_path_var(var, sep, &before, &after, &transform)?;
         } else {
             handle_normal_var(var, &before, &after)?;

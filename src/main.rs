@@ -37,7 +37,7 @@
 //! ```
 
 extern crate clap;
-use clap::{Parser,crate_name,crate_authors,crate_version,crate_description};
+use clap::{crate_authors, crate_description, crate_name, crate_version, Parser};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -92,19 +92,43 @@ SECURITY:
     Never use the output without checking it, as some people are not nice."
 )]
 struct Args {
-    #[arg(short='e', value_name = "VAR", help = "Ignores the environment variable VAR")]
+    #[arg(
+        short = 'e',
+        value_name = "VAR",
+        help = "Ignores the environment variable VAR"
+    )]
     except: Vec<String>,
-    #[arg(short = 'r', value_name = "OLD:NEW", help = "Replaces OLD path fragment with NEW path fragment")]
+    #[arg(
+        short = 'r',
+        value_name = "OLD:NEW",
+        help = "Replaces OLD path fragment with NEW path fragment"
+    )]
     replace: Vec<String>,
-    #[arg(short = 'd', value_name= "FRAGMENT", help = "Drop paths containing FRAGMENT")]
+    #[arg(
+        short = 'd',
+        value_name = "FRAGMENT",
+        help = "Drop paths containing FRAGMENT"
+    )]
     drop: Vec<String>,
-    #[arg(short = 'x', help = "Only keep path components that are accessible by current user on the local machine")]
+    #[arg(
+        short = 'x',
+        help = "Only keep path components that are accessible by current user on the local machine"
+    )]
     check_path: bool,
     #[arg(short = 'p', help = "Turns PREFIX into a variable")]
     prefix: Option<String>,
-    #[arg(short = 's', value_name = "VAR=VAL", help = "Turns VAL into a variable")]
+    #[arg(
+        short = 's',
+        value_name = "VAR=VAL",
+        help = "Turns VAL into a variable"
+    )]
     var: Vec<String>,
-    #[arg(id = "type", short = 't', value_name = "VAR:TYPE[:SEP]", help = "Handle VAR as TYPE (p: path, n: normal), for TYPE=p the path separator SEP (default ':') will be used")]
+    #[arg(
+        id = "type",
+        short = 't',
+        value_name = "VAR:TYPE[:SEP]",
+        help = "Handle VAR as TYPE (p: path, n: normal), for TYPE=p the path separator SEP (default ':') will be used"
+    )]
     typ: Vec<String>,
     #[arg(short = 'c', help = "Visible in the result")]
     comment: Option<String>,
@@ -128,7 +152,7 @@ struct Transform<'a> {
     drops: &'a [String],
     replacements: &'a [Replacement],
     vars: &'a BTreeMap<String, String>,
-    check_path: bool
+    check_path: bool,
 }
 
 /// Parse Linux shell environment from `io::stdin`
@@ -139,8 +163,7 @@ struct Transform<'a> {
 /// * `before` Map that will be filled with the environment variable to value mappings by reading `io::stdin`
 /// # Error Handling
 /// Crash if `io::stdin` doesn't deliver an environment in the format of `/proc/self/environ`
-fn parse_env(before: &mut BTreeMap<String, String>)
-{
+fn parse_env(before: &mut BTreeMap<String, String>) {
     use std::io;
     use std::io::Read;
 
@@ -161,8 +184,7 @@ fn parse_env(before: &mut BTreeMap<String, String>)
 /// * `typmap` Variable name to type map
 /// # Return
 /// true if the variable is in the typmap with a nonempty separator
-fn is_path(var: &str, typmap: &BTreeMap<String, Option<String>>) -> bool
-{
+fn is_path(var: &str, typmap: &BTreeMap<String, Option<String>>) -> bool {
     typmap.contains_key(var) && typmap.get(var).unwrap().is_some()
 }
 
@@ -172,16 +194,19 @@ fn is_path(var: &str, typmap: &BTreeMap<String, Option<String>>) -> bool
 /// * `path` String slice representing a file system path
 /// # Returns
 /// String containing the canonicalized path. If `path` cannot be canonicalized, it is returned as is.
-fn to_canonic(path: &str) -> Result<String, String>
-{
+fn to_canonic(path: &str) -> Result<String, String> {
     use std::fs::canonicalize;
 
-    canonicalize(path).map_or_else(|_| Ok(path.to_string()),                        // cannot canonicalize
-                                   |p| if let Some(s) = p.to_str() {
-                                       Ok(s.to_string())                                    // canonicalized path
-                                    } else {
-                                        Err(format!("unsupported path: {}", path.cyan()))   // path to utf8 conversion fails
-                                    })
+    canonicalize(path).map_or_else(
+        |_| Ok(path.to_string()), // cannot canonicalize
+        |p| {
+            if let Some(s) = p.to_str() {
+                Ok(s.to_string()) // canonicalized path
+            } else {
+                Err(format!("unsupported path: {}", path.cyan())) // path to utf8 conversion fails
+            }
+        },
+    )
 }
 
 /// Map path components
@@ -198,8 +223,7 @@ fn to_canonic(path: &str) -> Result<String, String>
 /// * `transform` Transform arguments
 /// # Returns
 /// String containing the mapped path.
-fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, String>
-{
+fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, String> {
     use std::path::Path;
 
     let mut path_list = Vec::new();
@@ -209,19 +233,37 @@ fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, Stri
     if transform.check_path {
         path_list.retain(|p| Path::new(p).exists())
     }
-    if ! transform.drops.is_empty() {
+    if !transform.drops.is_empty() {
         path_list.retain(|p| !transform.drops.iter().any(|d| p.contains(d)))
     }
-    if ! transform.replacements.is_empty() {
-        path_list = path_list.into_iter().map(|p| transform.replacements.iter().fold(p, |path, r| path.replace(&r.0, &r.1))).collect()
+    if !transform.replacements.is_empty() {
+        path_list = path_list
+            .into_iter()
+            .map(|p| {
+                transform
+                    .replacements
+                    .iter()
+                    .fold(p, |path, r| path.replace(&r.0, &r.1))
+            })
+            .collect()
     }
-    if ! transform.vars.is_empty() {
-        path_list = path_list.into_iter().map(|mut p| {
-            transform.vars.iter().for_each(|(var, val)| p = p.replace(val, &(String::from("${") + var + "}")));
-            p
-        }).collect()
+    if !transform.vars.is_empty() {
+        path_list = path_list
+            .into_iter()
+            .map(|mut p| {
+                transform
+                    .vars
+                    .iter()
+                    .for_each(|(var, val)| p = p.replace(val, &(String::from("${") + var + "}")));
+                p
+            })
+            .collect()
     }
-    Ok(path_list.into_iter().fold(String::from(""), |path, p| path + sep + &p).trim_start_matches(sep).to_string())
+    Ok(path_list
+        .into_iter()
+        .fold(String::from(""), |path, p| path + sep + &p)
+        .trim_start_matches(sep)
+        .to_string())
 }
 
 /// Parse replacement arguments
@@ -233,19 +275,24 @@ fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, Stri
 /// * `replacements` Optional iterator over replacement option strings
 /// # Returns
 /// Optional vector of [Replacement] structures
-fn parse_replacements(replacements: Vec<String>) -> Result<Vec<Replacement>, String>
-{
+fn parse_replacements(replacements: Vec<String>) -> Result<Vec<Replacement>, String> {
     let mut replacements_list = Vec::new();
-    if ! replacements.is_empty() {
+    if !replacements.is_empty() {
         for r in replacements {
             let mut split = r.splitn(2, ':');
             let orig = if let Some(s) = split.next() {
                 if s.is_empty() {
-                    return Err(format!("unsupported replacement {}, use OLD:NEW", r.yellow()))
+                    return Err(format!(
+                        "unsupported replacement {}, use OLD:NEW",
+                        r.yellow()
+                    ));
                 };
                 s
             } else {
-                return Err(format!("replacement: first part of {}, use OLD:NEW", r.cyan()))
+                return Err(format!(
+                    "replacement: first part of {}, use OLD:NEW",
+                    r.cyan()
+                ));
             };
             let repl = split.next().unwrap_or("");
             replacements_list.push(Replacement(orig.to_string(), repl.to_string()));
@@ -263,28 +310,39 @@ fn parse_replacements(replacements: Vec<String>) -> Result<Vec<Replacement>, Str
 /// * `vars` Optional iterator over variable substitution strings
 /// # Return
 /// Optional mapping from variable names to variable values
-fn parse_variables(prefix: Option<String>, vars: Vec<String>) -> Result<BTreeMap<String, String>, String>
-{
+fn parse_variables(
+    prefix: Option<String>,
+    vars: Vec<String>,
+) -> Result<BTreeMap<String, String>, String> {
     let mut btree = BTreeMap::new();
     prefix.and_then(|value| btree.insert(PREFIX_VAR.to_string(), value));
-    if ! vars.is_empty() {
+    if !vars.is_empty() {
         for v in vars {
             let mut split = v.splitn(2, '=');
             let var = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("variable: first part of {}, use VAR=VALUE", v.cyan()))
+                return Err(format!(
+                    "variable: first part of {}, use VAR=VALUE",
+                    v.cyan()
+                ));
             };
             let val = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("variable: second part of {}, use VAR=VALUE", v.cyan()))
+                return Err(format!(
+                    "variable: second part of {}, use VAR=VALUE",
+                    v.cyan()
+                ));
             };
             if var.is_empty() || val.is_empty() {
-                return Err(format!("variable substitution {}, use VAR=VALUE", v.yellow()))
+                return Err(format!(
+                    "variable substitution {}, use VAR=VALUE",
+                    v.yellow()
+                ));
             }
             if btree.get(var).is_some() {
-                return Err(format!("duplicate definition of variable {}", var.cyan()))
+                return Err(format!("duplicate definition of variable {}", var.cyan()));
             }
             btree.insert(var.to_string(), val.to_string());
         }
@@ -303,25 +361,30 @@ fn parse_variables(prefix: Option<String>, vars: Vec<String>) -> Result<BTreeMap
 /// * `types` Optional iterator over variable type strings
 /// # Return
 /// Potentially empty mapping from variable names to variable types
-fn parse_vartypes(types: Vec<String>) -> Result<BTreeMap<String, Option<String>>, String>
-{
+fn parse_vartypes(types: Vec<String>) -> Result<BTreeMap<String, Option<String>>, String> {
     let mut btree = BTreeMap::new();
-    if ! types.is_empty() {
+    if !types.is_empty() {
         for v in types {
             let mut split = v.splitn(3, ':');
             let var = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("type: first part of {}, use VAR:TYPE[:SEP]", v.cyan()))
+                return Err(format!(
+                    "type: first part of {}, use VAR:TYPE[:SEP]",
+                    v.cyan()
+                ));
             };
             let typ = if let Some(s) = split.next() {
                 s
             } else {
-                return Err(format!("type: second part of {}, use VAR:TYPE[:SEP]", v.cyan()))
+                return Err(format!(
+                    "type: second part of {}, use VAR:TYPE[:SEP]",
+                    v.cyan()
+                ));
             };
             let mut sep = split.next();
             if var.is_empty() || typ.is_empty() {
-                return Err(format!("type {}, use VAR:TYPE[:SEP]", v.yellow()))
+                return Err(format!("type {}, use VAR:TYPE[:SEP]", v.yellow()));
             }
             if typ == "p" {
                 if let Some(s) = sep {
@@ -333,13 +396,20 @@ fn parse_vartypes(types: Vec<String>) -> Result<BTreeMap<String, Option<String>>
                 }
             } else if typ == "n" {
                 if sep.is_some() {
-                    return Err(format!("type: no separator allowed for {}:n", var.cyan()))
+                    return Err(format!("type: no separator allowed for {}:n", var.cyan()));
                 }
             } else {
-                return Err(format!("type: TYPE {} for variable {} undefined, use one of 'n', 'p'", typ.yellow(), var.cyan()))
+                return Err(format!(
+                    "type: TYPE {} for variable {} undefined, use one of 'n', 'p'",
+                    typ.yellow(),
+                    var.cyan()
+                ));
             }
             if btree.get(var).is_some() {
-                return Err(format!("duplicate definition of type for variable {}", var.cyan()))
+                return Err(format!(
+                    "duplicate definition of type for variable {}",
+                    var.cyan()
+                ));
             }
             btree.insert(var.to_string(), sep.map(|s| s.to_string()));
         }
@@ -355,15 +425,14 @@ fn parse_vartypes(types: Vec<String>) -> Result<BTreeMap<String, Option<String>>
 /// # Argument
 /// * `typmap` The variable to type map that will be updated
 /// * `vars` Set of variables to consider
-fn update_vartypes(typmap: &mut BTreeMap<String, Option<String>>, vars: &BTreeSet<&str>)
-{
+fn update_vartypes(typmap: &mut BTreeMap<String, Option<String>>, vars: &BTreeSet<&str>) {
     for var in vars.iter() {
-        if ! typmap.contains_key(&var.to_string()) {
+        if !typmap.contains_key(&var.to_string()) {
             let var_to_lower = var.to_lowercase();
             for part in ["path", "home", "root", "file", "exe", "prefix", "dir"] {
                 if var_to_lower.contains(part) {
                     typmap.insert(var.to_string(), Some(PATH_SEP.to_string()));
-                    break
+                    break;
                 }
             }
         }
@@ -379,8 +448,7 @@ fn update_vartypes(typmap: &mut BTreeMap<String, Option<String>>, vars: &BTreeSe
 /// * `s` String
 /// # Return
 /// TCL friendly version of `s`
-fn tclize(s : &str) -> String
-{
+fn tclize(s: &str) -> String {
     if s.chars().any(|c| c.is_whitespace()) {
         String::new() + "\"" + &s.replace('\"', "\\\"") + "\""
     } else {
@@ -394,10 +462,9 @@ fn tclize(s : &str) -> String
 /// * `s` String representing one output line
 /// # Return
 /// Error if argument *s* represents more than one line
-fn print_str(s: &str) -> Result<(), String>
-{
+fn print_str(s: &str) -> Result<(), String> {
     if s.lines().count() > 1 {
-        return Err(format!("cannot handle multiline output:\n{}", s.yellow()))
+        return Err(format!("cannot handle multiline output:\n{}", s.yellow()));
     }
     println!("{}", s);
     Ok(())
@@ -412,8 +479,7 @@ fn print_str(s: &str) -> Result<(), String>
 /// ```
 /// unsetenv HELLO
 /// ```
-fn print_var(op: &str, var: &str) -> Result<(), String>
-{
+fn print_var(op: &str, var: &str) -> Result<(), String> {
     print_str(&format!("{} {}", op, var))
 }
 
@@ -427,8 +493,7 @@ fn print_var(op: &str, var: &str) -> Result<(), String>
 /// ```
 /// setenv HELLO 1
 /// ```
-fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(), String>
-{
+fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(), String> {
     if !val.is_empty() {
         print_str(&format!("{} {} {}", op, var, &tclize(val)))?
     } else if !drop_empty {
@@ -451,8 +516,7 @@ fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> Result<(),
 /// set PREFIX /home/stadler_h
 /// set BIN bin
 /// ```
-fn print_header(vars: &BTreeMap<String, String>) -> Result<(), String>
-{
+fn print_header(vars: &BTreeMap<String, String>) -> Result<(), String> {
     use std::env::args;
 
     let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
@@ -471,42 +535,67 @@ fn print_header(vars: &BTreeMap<String, String>) -> Result<(), String>
 /// * `before` Environment before change
 /// * `after` Environment after change
 /// * `transform` Transform arguments
-fn handle_path_var(var: &str,
-                   sep: &str,
-                   before: &BTreeMap<String, String>,
-                   after: &BTreeMap<String, String>,
-                   transform: &Transform) -> Result<(), String>
-{
+fn handle_path_var(
+    var: &str,
+    sep: &str,
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+    transform: &Transform,
+) -> Result<(), String> {
     if before.contains_key(var) {
         if after.contains_key(var) {
             let val_before = before.get(var).unwrap().trim();
             let val_after = after.get(var).unwrap().trim();
             if val_before != val_after {
                 if val_after.starts_with(val_before) {
-                    let delta = val_after.get(val_before.len() .. val_after.len()).unwrap();
+                    let delta = val_after.get(val_before.len()..val_after.len()).unwrap();
                     if delta.starts_with(sep) ^ val_before.ends_with(sep) {
                         print_var_val("append-path", var, &map_path(delta, sep, transform)?, true)?
                     } else {
-                        eprintln!("# WARNING: unsupported path suffix in variable: {}", var.cyan())
+                        eprintln!(
+                            "# WARNING: unsupported path suffix in variable: {}",
+                            var.cyan()
+                        )
                     }
                 } else if val_after.ends_with(val_before) {
-                    let delta = val_after.get(0 .. val_after.len() - val_before.len()).unwrap();
+                    let delta = val_after
+                        .get(0..val_after.len() - val_before.len())
+                        .unwrap();
                     if delta.ends_with(sep) ^ val_before.starts_with(sep) {
                         print_var_val("prepend-path", var, &map_path(delta, sep, transform)?, true)?
                     } else {
-                        eprintln!("# WARNING: unsupported path prefix in variable: {}", var.cyan());
+                        eprintln!(
+                            "# WARNING: unsupported path prefix in variable: {}",
+                            var.cyan()
+                        );
                         eprintln!("#          before: {}", val_before);
                         eprintln!("#          after: {}", val_after)
                     }
                 } else if val_after.contains(val_before) {
                     let start_end = val_after.split(val_before).collect::<Vec<&str>>();
                     if start_end.len() != 2 {
-                        eprintln!("# WARNING: ignoring unexpected change in variable: {}", var.cyan());
+                        eprintln!(
+                            "# WARNING: ignoring unexpected change in variable: {}",
+                            var.cyan()
+                        );
                     }
-                    print_var_val("prepend-path", var, &map_path(start_end[0], sep, transform)?, true)?;
-                    print_var_val("append-path", var, &map_path(start_end[1], sep, transform)?, true)?
+                    print_var_val(
+                        "prepend-path",
+                        var,
+                        &map_path(start_end[0], sep, transform)?,
+                        true,
+                    )?;
+                    print_var_val(
+                        "append-path",
+                        var,
+                        &map_path(start_end[1], sep, transform)?,
+                        true,
+                    )?
                 } else {
-                    eprintln!("# WARNING: ignoring unsupported change in path ariable: {}", var.cyan());
+                    eprintln!(
+                        "# WARNING: ignoring unsupported change in path ariable: {}",
+                        var.cyan()
+                    );
                     eprintln!("#          before: {}", val_before);
                     eprintln!("#          after: {}", val_after)
                 }
@@ -527,16 +616,20 @@ fn handle_path_var(var: &str,
 /// * `var` Variable name
 /// * `before` Environment before change
 /// * `after` Environment after change
-fn handle_normal_var(var: &str,
-                     before: &BTreeMap<String, String>,
-                     after: &BTreeMap<String, String>) -> Result<(), String>
-{
+fn handle_normal_var(
+    var: &str,
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+) -> Result<(), String> {
     if before.contains_key(var) {
         if after.contains_key(var) {
             let val_before = before.get(var).unwrap();
             let val_after = after.get(var).unwrap();
             if val_before != val_after {
-                eprintln!("# WARNING: ignoring unsupported change in normal variable: {}", var.cyan());
+                eprintln!(
+                    "# WARNING: ignoring unsupported change in normal variable: {}",
+                    var.cyan()
+                );
                 eprintln!("#          before: {}", val_before);
                 eprintln!("#          after: {}", val_after)
             }
@@ -550,8 +643,7 @@ fn handle_normal_var(var: &str,
 }
 
 /// Run the program
-fn run() -> Result<(), String>
-{
+fn run() -> Result<(), String> {
     let cli_args = Args::parse();
 
     let exceptions = cli_args.except;
@@ -568,21 +660,34 @@ fn run() -> Result<(), String>
     for (var, val) in std::env::vars() {
         after.insert(var, val);
     }
-    let vars_before : BTreeSet<&str> = before.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
-    let vars_after : BTreeSet<&str> = after.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
-    let mut vars : BTreeSet<&str> = vars_before.union(&vars_after).cloned().collect::<BTreeSet<&str>>();
-    exceptions.into_iter().for_each(|var| { vars.remove(var.as_str()); });
+    let vars_before: BTreeSet<&str> = before
+        .keys()
+        .map(|s| s.as_str())
+        .collect::<BTreeSet<&str>>();
+    let vars_after: BTreeSet<&str> = after.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
+    let mut vars: BTreeSet<&str> = vars_before
+        .union(&vars_after)
+        .cloned()
+        .collect::<BTreeSet<&str>>();
+    exceptions.into_iter().for_each(|var| {
+        vars.remove(var.as_str());
+    });
     update_vartypes(&mut vartypes, &vars);
     let transform = Transform {
         drops: drops.as_slice(),
         replacements: &replacements,
         vars: &variables,
-        check_path
+        check_path,
     };
 
     for var in vars {
         if is_path(var, &vartypes) {
-            let sep = vartypes.get(var).unwrap().as_ref().unwrap_or_else(|| panic!("internal error: expected nonempty separator for variable {}", var));
+            let sep = vartypes.get(var).unwrap().as_ref().unwrap_or_else(|| {
+                panic!(
+                    "internal error: expected nonempty separator for variable {}",
+                    var
+                )
+            });
             handle_path_var(var, sep, &before, &after, &transform)?;
         } else {
             handle_normal_var(var, &before, &after)?;
@@ -592,8 +697,7 @@ fn run() -> Result<(), String>
 }
 
 /// Run program and handle errors
-fn main()
-{
+fn main() {
     if let Err(msg) = run() {
         eprintln!("{} {}", "error:".red(), msg)
     }

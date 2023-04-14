@@ -94,31 +94,36 @@ SECURITY:
 struct Args {
     #[arg(
         short = 'e',
+        long,
         value_name = "VAR",
         help = "Ignores the environment variable VAR"
     )]
     except: Vec<String>,
     #[arg(
         short = 'r',
+        long,
         value_name = "OLD:NEW",
         help = "Replaces OLD path fragment with NEW path fragment"
     )]
     replace: Vec<String>,
     #[arg(
         short = 'd',
+        long,
         value_name = "FRAGMENT",
         help = "Drop paths containing FRAGMENT"
     )]
     drop: Vec<String>,
     #[arg(
         short = 'x',
+        long,
         help = "Only keep path components that are accessible by current user on the local machine"
     )]
     check_path: bool,
-    #[arg(short = 'p', help = "Turns PREFIX into a variable")]
+    #[arg(short = 'p', long, help = "Turns PREFIX into a variable")]
     prefix: Option<String>,
     #[arg(
         short = 's',
+        long,
         value_name = "VAR=VAL",
         help = "Turns VAL into a variable"
     )]
@@ -126,11 +131,12 @@ struct Args {
     #[arg(
         id = "type",
         short = 't',
+        long,
         value_name = "VAR:TYPE[:SEP]",
         help = "Handle VAR as TYPE (p: path, n: normal), for TYPE=p the path separator SEP (default ':') will be used"
     )]
     typ: Vec<String>,
-    #[arg(short = 'c', help = "Visible in the result")]
+    #[arg(short = 'c', long, help = "Visible in the result")]
     comment: Option<String>,
 }
 

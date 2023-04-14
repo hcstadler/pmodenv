@@ -8,7 +8,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-console = "0"
+text-colorizer = "1"
 clap = { version = "4", features = [ "derive", "cargo", "deprecated" ] }
 
 [profile.release]

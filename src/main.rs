@@ -239,37 +239,20 @@ fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, Stri
     if transform.check_path {
         path_list.retain(|p| Path::new(p).exists())
     }
-    if !transform.drops.is_empty() {
-        path_list.retain(|p| !transform.drops.iter().any(|d| p.contains(d)))
+    for d in transform.drops {
+        path_list.retain(|p| p.contains(d))
     }
-    if !transform.replacements.is_empty() {
-        path_list = path_list
-            .into_iter()
-            .map(|p| {
-                transform
-                    .replacements
-                    .iter()
-                    .fold(p, |path, r| path.replace(&r.0, &r.1))
-            })
-            .collect()
+    for r in transform.replacements {
+        for p in &mut path_list {
+            *p = p.replace(&r.0, &r.1)
+        }
     }
-    if !transform.vars.is_empty() {
-        path_list = path_list
-            .into_iter()
-            .map(|mut p| {
-                transform
-                    .vars
-                    .iter()
-                    .for_each(|(var, val)| p = p.replace(val, &(String::from("${") + var + "}")));
-                p
-            })
-            .collect()
+    for (var, val) in transform.vars {
+        for p in &mut path_list {
+            *p = p.replace(val, &format!("${{{}}}", var))
+        }
     }
-    Ok(path_list
-        .into_iter()
-        .fold(String::from(""), |path, p| path + sep + &p)
-        .trim_start_matches(sep)
-        .to_string())
+    Ok(path_list.join(sep))
 }
 
 /// Parse replacement arguments
@@ -432,7 +415,7 @@ fn parse_vartypes(types: Vec<String>) -> Result<BTreeMap<String, Option<String>>
 /// * `typmap` The variable to type map that will be updated
 /// * `vars` Set of variables to consider
 fn update_vartypes(typmap: &mut BTreeMap<String, Option<String>>, vars: &BTreeSet<&str>) {
-    for var in vars.iter() {
+    for var in vars {
         if !typmap.contains_key(&var.to_string()) {
             let var_to_lower = var.to_lowercase();
             for part in ["path", "home", "root", "file", "exe", "prefix", "dir"] {
@@ -527,7 +510,7 @@ fn print_header(vars: &BTreeMap<String, String>) -> Result<(), String> {
 
     let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
     print_str(&comment)?;
-    for (var, val) in vars.iter() {
+    for (var, val) in vars {
         print_var_val("set", var, val, true)?
     }
     Ok(())
@@ -675,9 +658,9 @@ fn run() -> Result<(), String> {
         .union(&vars_after)
         .cloned()
         .collect::<BTreeSet<&str>>();
-    exceptions.into_iter().for_each(|var| {
+    for var in exceptions {
         vars.remove(var.as_str());
-    });
+    }
     update_vartypes(&mut vartypes, &vars);
     let transform = Transform {
         drops: drops.as_slice(),

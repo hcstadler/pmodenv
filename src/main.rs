@@ -40,6 +40,7 @@ extern crate clap;
 use clap::{crate_authors, crate_description, crate_name, crate_version, Parser};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::iter::FromIterator;
 
 extern crate text_colorizer;
 use text_colorizer::Colorize;
@@ -154,10 +155,10 @@ struct Replacement(String, String);
 /// * `vars` Variable substitutions
 /// * `check_path` Check for nonaccessible paths
 #[derive(Clone, Debug)]
-struct Transform<'a> {
-    drops: &'a [String],
-    replacements: &'a [Replacement],
-    vars: &'a BTreeMap<String, String>,
+struct Transform {
+    drops: Vec<String>,
+    replacements: Vec<Replacement>,
+    vars: BTreeMap<String, String>,
     check_path: bool,
 }
 
@@ -239,15 +240,15 @@ fn map_path(path: &str, sep: &str, transform: &Transform) -> Result<String, Stri
     if transform.check_path {
         path_list.retain(|p| Path::new(p).exists())
     }
-    for d in transform.drops {
-        path_list.retain(|p| p.contains(d))
+    for d in &transform.drops {
+        path_list.retain(|p| !p.contains(d))
     }
-    for r in transform.replacements {
+    for r in &transform.replacements {
         for p in &mut path_list {
             *p = p.replace(&r.0, &r.1)
         }
     }
-    for (var, val) in transform.vars {
+    for (var, val) in &transform.vars {
         for p in &mut path_list {
             *p = p.replace(val, &format!("${{{}}}", var))
         }
@@ -649,23 +650,17 @@ fn run() -> Result<(), String> {
     for (var, val) in std::env::vars() {
         after.insert(var, val);
     }
-    let vars_before: BTreeSet<&str> = before
-        .keys()
-        .map(|s| s.as_str())
-        .collect::<BTreeSet<&str>>();
-    let vars_after: BTreeSet<&str> = after.keys().map(|s| s.as_str()).collect::<BTreeSet<&str>>();
-    let mut vars: BTreeSet<&str> = vars_before
-        .union(&vars_after)
-        .cloned()
-        .collect::<BTreeSet<&str>>();
+    let vars_before = BTreeSet::from_iter(before.keys().map(|s| s.as_str()));
+    let vars_after = BTreeSet::from_iter(after.keys().map(|s| s.as_str()));
+    let mut vars = BTreeSet::from_iter(vars_before.union(&vars_after).cloned());
     for var in exceptions {
         vars.remove(var.as_str());
     }
     update_vartypes(&mut vartypes, &vars);
     let transform = Transform {
-        drops: drops.as_slice(),
-        replacements: &replacements,
-        vars: &variables,
+        drops: drops,
+        replacements: replacements,
+        vars: variables,
         check_path,
     };
 

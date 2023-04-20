@@ -47,7 +47,6 @@ EXAMPLE:
 
 PRECONDITIONS:
     - Variable names are assumed to be nice: no strange characters.
-    - Path environment variables are assumed to have PATH in their name.
     - Variable values are assumed to be nice as well.
     - Paths are assumed to be nicely separated by ':' (or SEP).
     - Replacement and variable options are assumed to be nice: no nonsense overlaps

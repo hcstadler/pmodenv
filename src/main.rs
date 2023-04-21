@@ -537,17 +537,15 @@ fn handle_path_var(
     transform: &Transform,
     fatal_warnings: bool,
 ) -> GenericResult<()> {
-    match (before.contains_key(var), after.contains_key(var)) {
-        (false, _) => print_var_val(
+    match (before.get(var), after.get(var)) {
+        (None, Some(val_after)) => print_var_val(
             "prepend-path",
             var,
-            &map_path(after.get(var).unwrap(), sep, transform)?,
+            &map_path(val_after, sep, transform)?,
             true,
         )?,
-        (true, false) => print_var("unsetenv", var)?,
-        (true, true) => {
-            let val_before = before.get(var).unwrap().trim();
-            let val_after = after.get(var).unwrap().trim();
+        (Some(_), None) => print_var("unsetenv", var)?,
+        (Some(val_before), Some(val_after)) => {
             if val_after == val_before {
                 // no change
             } else if let Some(delta) = val_after.strip_prefix(val_before) {
@@ -613,7 +611,8 @@ fn handle_path_var(
                     fatal_warnings,
                 )?
             }
-        } // (true, true)
+        }
+        _ => panic!("internal error: variable without value"),
     } // match
     Ok(())
 }

@@ -668,7 +668,7 @@ fn run() -> GenericResult<()> {
     let after = HashMap::from_iter(std::env::vars());
     let vars_before: HashSet<&str> = HashSet::from_iter(before.keys().map(|s| s.as_str()));
     let vars_after: HashSet<&str> = HashSet::from_iter(after.keys().map(|s| s.as_str()));
-    let mut vars = HashSet::from_iter(vars_before.union(&vars_after).copied());
+    let mut vars = HashSet::from_iter(&vars_before | &vars_after);
     for var in exceptions {
         vars.remove(var.as_str());
     }

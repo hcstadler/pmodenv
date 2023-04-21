@@ -4,8 +4,8 @@
 
 extern crate clap;
 use clap::{crate_authors, crate_description, crate_name, crate_version, Parser};
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::iter::FromIterator;
 use thiserror::Error;
 
@@ -131,7 +131,7 @@ struct Replacement(String, String);
 struct Transform {
     drops: Vec<String>,
     replacements: Vec<Replacement>,
-    vars: BTreeMap<String, String>,
+    vars: HashMap<String, String>,
     check_path: bool,
 }
 
@@ -159,7 +159,7 @@ enum ProgramError {
 ///
 /// # Return
 /// Map var→val for all environment variables found
-fn parse_env() -> GenericResult<BTreeMap<String, String>> {
+fn parse_env() -> GenericResult<HashMap<String, String>> {
     use std::io;
     use std::io::Read;
 
@@ -184,7 +184,7 @@ fn parse_env() -> GenericResult<BTreeMap<String, String>> {
 /// * `typmap` Variable name to type map
 /// # Return
 /// true if the variable is in the typmap with a nonempty separator
-fn is_path(var: &str, typmap: &BTreeMap<String, Option<String>>) -> bool {
+fn is_path(var: &str, typmap: &HashMap<String, Option<String>>) -> bool {
     typmap.get(var).is_some()
 }
 
@@ -286,8 +286,8 @@ fn parse_replacements(replacements: Vec<String>) -> GenericResult<Vec<Replacemen
 fn parse_variables(
     prefix: Option<String>,
     vars: Vec<String>,
-) -> GenericResult<BTreeMap<String, String>> {
-    let mut btree = BTreeMap::new();
+) -> GenericResult<HashMap<String, String>> {
+    let mut btree = HashMap::new();
     prefix.and_then(|value| btree.insert(PREFIX_VAR.to_string(), value));
     for v in vars {
         match v.split_once('=') {
@@ -330,8 +330,8 @@ fn parse_variables(
 /// * `types` Variable type definitions
 /// # Return
 /// Mapping from variable names to variable types
-fn parse_vartypes(types: Vec<String>) -> GenericResult<BTreeMap<String, Option<String>>> {
-    let mut btree = BTreeMap::new();
+fn parse_vartypes(types: Vec<String>) -> GenericResult<HashMap<String, Option<String>>> {
+    let mut btree = HashMap::new();
     for v in types {
         let vardef = v.split_once(':');
         let typ = match vardef {
@@ -384,7 +384,7 @@ fn parse_vartypes(types: Vec<String>) -> GenericResult<BTreeMap<String, Option<S
 /// # Argument
 /// * `typmap` The variable to type map that will be updated
 /// * `vars` Set of variables to consider
-fn update_vartypes(typmap: &mut BTreeMap<String, Option<String>>, vars: &BTreeSet<&str>) {
+fn update_vartypes(typmap: &mut HashMap<String, Option<String>>, vars: &HashSet<&str>) {
     for var in vars {
         if !typmap.contains_key(*var) {
             let var_to_lower = var.to_lowercase();
@@ -480,7 +480,7 @@ fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> GenericRes
 /// set PREFIX /home/stadler_h
 /// set BIN bin
 /// ```
-fn print_header(vars: &BTreeMap<String, String>) -> GenericResult<()> {
+fn print_header(vars: &HashMap<String, String>) -> GenericResult<()> {
     use std::env::args;
 
     let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
@@ -532,8 +532,8 @@ fn print_change_warning(
 fn handle_path_var(
     var: &str,
     sep: &str,
-    before: &BTreeMap<String, String>,
-    after: &BTreeMap<String, String>,
+    before: &HashMap<String, String>,
+    after: &HashMap<String, String>,
     transform: &Transform,
     fatal_warnings: bool,
 ) -> GenericResult<()> {
@@ -627,8 +627,8 @@ fn handle_path_var(
 /// * `fatal_warnings` Treat warnings as fatal
 fn handle_normal_var(
     var: &str,
-    before: &BTreeMap<String, String>,
-    after: &BTreeMap<String, String>,
+    before: &HashMap<String, String>,
+    after: &HashMap<String, String>,
     fatal_warnings: bool,
 ) -> GenericResult<()> {
     match (before.get(var), after.get(var)) {
@@ -666,10 +666,10 @@ fn run() -> GenericResult<()> {
     print_header(&variables)?;
 
     let before = parse_env()?;
-    let after = BTreeMap::from_iter(std::env::vars());
-    let vars_before = BTreeSet::from_iter(before.keys().map(|s| s.as_str()));
-    let vars_after = BTreeSet::from_iter(after.keys().map(|s| s.as_str()));
-    let mut vars = BTreeSet::from_iter(vars_before.union(&vars_after).copied());
+    let after = HashMap::from_iter(std::env::vars());
+    let vars_before: HashSet<&str> = HashSet::from_iter(before.keys().map(|s| s.as_str()));
+    let vars_after: HashSet<&str> = HashSet::from_iter(after.keys().map(|s| s.as_str()));
+    let mut vars = HashSet::from_iter(vars_before.union(&vars_after).copied());
     for var in exceptions {
         vars.remove(var.as_str());
     }

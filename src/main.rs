@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::iter::FromIterator;
 use thiserror::Error;
 
-type GenericError = Box<dyn std::error::Error>;
+type GenericError = Box<dyn std::error::Error + Send + Sync + 'static>;
 type GenericResult<T> = Result<T, GenericError>;
 
 extern crate text_colorizer;
@@ -164,7 +164,7 @@ fn parse_env() -> GenericResult<HashMap<String, String>> {
     use std::io::Read;
 
     let mut env_string = String::new();
-    io::stdin().read_to_string(&mut env_string)?;
+    io::stdin().lock().read_to_string(&mut env_string)?;
     env_string
         .trim_matches('\0')
         .split('\0')
@@ -213,10 +213,10 @@ fn to_canonic(path: &str) -> GenericResult<String> {
 /// Map path components
 ///
 /// The path is assumed to consist of components separated by `sep`.
-/// Components are first canonicalized using [to_canonic],
+/// Components are first canonicalized using [`to_canonic`],
 /// then nonexistent components and those matching drop fragments are dropped,
 /// then fragment replacements are applied (in slice element order),
-/// and finally variable values (in cluding prefix) are replaced in random order with `${`VAR`}` (or `${`[PREFIX_VAR]`}`, resp)
+/// and finally variable values (in cluding prefix) are replaced in random order with `${`VAR`}` (or `${`[`PREFIX_VAR`]`}`, resp)
 ///
 /// # Argument
 /// * `path` String slice representing a list of file system paths separated by `sep`
@@ -229,22 +229,22 @@ fn map_path(path: &str, sep: &str, transform: &Transform) -> GenericResult<Strin
 
     let mut path_list = Vec::new();
     for p in path.trim().split(sep).filter(|p| !p.is_empty()) {
-        path_list.push(to_canonic(p)?)
+        path_list.push(to_canonic(p)?);
     }
     if transform.check_path {
-        path_list.retain(|p| Path::new(p).exists())
+        path_list.retain(|p| Path::new(p).exists());
     }
     for d in &transform.drops {
-        path_list.retain(|p| !p.contains(d))
+        path_list.retain(|p| !p.contains(d));
     }
     for r in &transform.replacements {
         for p in &mut path_list {
-            *p = p.replace(&r.0, &r.1)
+            *p = p.replace(&r.0, &r.1);
         }
     }
     for (var, val) in &transform.vars {
         for p in &mut path_list {
-            *p = p.replace(val, &format!("${{{}}}", var))
+            *p = p.replace(val, &format!("${{{var}}}"));
         }
     }
     Ok(path_list.join(sep))
@@ -261,7 +261,7 @@ fn map_path(path: &str, sep: &str, transform: &Transform) -> GenericResult<Strin
 /// Vector of [Replacement] structures
 fn parse_replacements(replacements: Vec<String>) -> GenericResult<Vec<Replacement>> {
     replacements
-        .iter()
+        .into_iter()
         .map(|r| match r.split_once(':') {
             None | Some(("", _)) => Err(Box::new(ProgramError::Replacement(format!(
                 "unsupported replacement {}, use OLD:NEW",
@@ -282,7 +282,7 @@ fn parse_replacements(replacements: Vec<String>) -> GenericResult<Vec<Replacemen
 /// # Argument
 /// * `vars` Variable substitution strings
 /// # Return
-/// Mapping from variable names to variable values, including [PREFIX_VAR] if defined
+/// Mapping from variable names to variable values, including [`PREFIX_VAR`] if defined
 fn parse_variables(
     prefix: Option<String>,
     vars: Vec<String>,
@@ -303,17 +303,17 @@ fn parse_variables(
                 "second part of {}, use VAR=VALUE",
                 v.cyan()
             ))) as GenericError),
-            Some((var, val)) => {
-                if btree.insert(var.to_string(), val.to_string()).is_some() {
+            Some((name, value)) => {
+                if btree.insert(name.to_string(), value.to_string()).is_some() {
                     Err(Box::new(ProgramError::Variable(format!(
                         "duplicate definition of variable {}",
-                        var.cyan()
+                        name.cyan()
                     ))) as GenericError)
                 } else {
                     Ok(())
                 }
             }
-        }?
+        }?;
     }
     Ok(btree)
 }
@@ -364,7 +364,7 @@ fn parse_vartypes(types: Vec<String>) -> GenericResult<HashMap<String, Option<St
         }?;
         let var = vardef.unwrap().0;
         if btree
-            .insert(var.to_string(), typ.map(|s| s.to_string()))
+            .insert(var.to_string(), typ.map(std::string::ToString::to_string))
             .is_some()
         {
             return Err(Box::new(ProgramError::Type(format!(
@@ -390,7 +390,7 @@ fn update_vartypes(typmap: &mut HashMap<String, Option<String>>, vars: &HashSet<
             let var_to_lower = var.to_lowercase();
             for part in ["path", "home", "root", "file", "exe", "prefix", "dir"] {
                 if var_to_lower.contains(part) {
-                    typmap.insert(var.to_string(), Some(PATH_SEP.to_string()));
+                    typmap.insert((*var).to_string(), Some(PATH_SEP.to_string()));
                     break;
                 }
             }
@@ -409,7 +409,7 @@ fn update_vartypes(typmap: &mut HashMap<String, Option<String>>, vars: &HashSet<
 /// # Return
 /// TCL friendly version of `s`
 fn tclize(s: &str) -> String {
-    if s.chars().any(|c| c.is_whitespace()) {
+    if s.chars().any(char::is_whitespace) {
         String::new() + "\"" + &s.replace('\"', "\\\"") + "\""
     } else {
         s.to_string()
@@ -429,7 +429,7 @@ fn print_str(s: &str) -> GenericResult<()> {
             s.yellow()
         ))));
     }
-    println!("{}", s);
+    println!("{s}");
     Ok(())
 }
 
@@ -443,7 +443,7 @@ fn print_str(s: &str) -> GenericResult<()> {
 /// unsetenv HELLO
 /// ```
 fn print_var(op: &str, var: &str) -> GenericResult<()> {
-    print_str(&format!("{} {}", op, var))
+    print_str(&format!("{op} {var}"))
 }
 
 /// Binary operation on variable
@@ -458,13 +458,13 @@ fn print_var(op: &str, var: &str) -> GenericResult<()> {
 /// setenv HELLO 1
 /// # DROPPED: append-path PATH
 /// ```
-fn print_var_val(op: &str, var: &str, val: &str, drop_empty: bool) -> GenericResult<()> {
-    if !val.is_empty() {
-        print_str(&format!("{} {} {}", op, var, &tclize(val)))
+fn print_var_val(op: &str, name: &str, value: &str, drop_empty: bool) -> GenericResult<()> {
+    if !value.is_empty() {
+        print_str(&format!("{} {} {}", op, name, &tclize(value)))
     } else if !drop_empty {
-        print_str(&format!("{} {} \"\"", op, var))
+        print_str(&format!("{op} {name} \"\""))
     } else {
-        print_str(&format!("# DROPPED: {} {}", op, var.cyan()))
+        print_str(&format!("# DROPPED: {} {}", op, name.cyan()))
     }
 }
 
@@ -486,7 +486,7 @@ fn print_header(vars: &HashMap<String, String>) -> GenericResult<()> {
     let comment = args().fold(String::from("# produced by:"), |s, arg| s + " " + &arg);
     print_str(&comment)?;
     for (var, val) in vars {
-        print_var_val("set", var, val, true)?
+        print_var_val("set", var, val, true)?;
     }
     Ok(())
 }
@@ -510,9 +510,9 @@ fn print_change_warning(
     message: &str,
     fatal: bool,
 ) -> GenericResult<()> {
-    print_str(&format!("# WARNING: {}", message))?;
-    print_str(&format!("#          before: {}", val_before))?;
-    print_str(&format!("#          after: {}", val_after))?;
+    print_str(&format!("# WARNING: {message}"))?;
+    print_str(&format!("#          before: {val_before}"))?;
+    print_str(&format!("#          after: {val_after}"))?;
     if fatal {
         Err(Box::new(ProgramError::Fatal(message.to_string())))
     } else {
@@ -550,25 +550,25 @@ fn handle_path_var(
                 // no change
             } else if let Some(delta) = val_after.strip_prefix(val_before) {
                 if delta.starts_with(sep) ^ val_before.ends_with(sep) {
-                    print_var_val("append-path", var, &map_path(delta, sep, transform)?, true)?
+                    print_var_val("append-path", var, &map_path(delta, sep, transform)?, true)?;
                 } else {
                     print_change_warning(
                         val_before,
                         val_after,
                         &format!("unsupported path suffix in variable: {}", var.cyan()),
                         fatal_warnings,
-                    )?
+                    )?;
                 }
             } else if let Some(delta) = val_after.strip_suffix(val_before) {
                 if delta.ends_with(sep) ^ val_before.starts_with(sep) {
-                    print_var_val("prepend-path", var, &map_path(delta, sep, transform)?, true)?
+                    print_var_val("prepend-path", var, &map_path(delta, sep, transform)?, true)?;
                 } else {
                     print_change_warning(
                         val_before,
                         val_after,
                         &format!("unsupported path prefix in variable: {}", var.cyan()),
                         fatal_warnings,
-                    )?
+                    )?;
                 }
             } else if val_after.contains(val_before) {
                 let start_end: Vec<&str> = val_after.split(val_before).collect();
@@ -578,7 +578,7 @@ fn handle_path_var(
                         val_after,
                         &format!("ignoring unexpected change in variable: {}", var.cyan()),
                         fatal_warnings,
-                    )?
+                    )?;
                 } else if start_end[0].ends_with(sep) && start_end[1].starts_with(sep) {
                     print_var_val(
                         "prepend-path",
@@ -591,14 +591,14 @@ fn handle_path_var(
                         var,
                         &map_path(start_end[1], sep, transform)?,
                         true,
-                    )?
+                    )?;
                 } else {
                     print_change_warning(
                         val_before,
                         val_after,
                         &format!("unsupported path prefix/suffix in variable: {}", var.cyan()),
                         fatal_warnings,
-                    )?
+                    )?;
                 }
             } else {
                 print_change_warning(
@@ -609,7 +609,7 @@ fn handle_path_var(
                         var.cyan()
                     ),
                     fatal_warnings,
-                )?
+                )?;
             }
         }
         _ => panic!("internal error: variable without value"),
@@ -641,7 +641,7 @@ fn handle_normal_var(
                         var.cyan()
                     ),
                     fatal_warnings,
-                )?
+                )?;
             }
         }
         (Some(_val_before), None) => print_var("unsetenv", var)?,
@@ -666,8 +666,8 @@ fn run() -> GenericResult<()> {
 
     let before = parse_env()?;
     let after = HashMap::from_iter(std::env::vars());
-    let vars_before: HashSet<&str> = HashSet::from_iter(before.keys().map(|s| s.as_str()));
-    let vars_after: HashSet<&str> = HashSet::from_iter(after.keys().map(|s| s.as_str()));
+    let vars_before: HashSet<&str> = HashSet::from_iter(before.keys().map(std::string::String::as_str));
+    let vars_after: HashSet<&str> = HashSet::from_iter(after.keys().map(std::string::String::as_str));
     let mut vars = HashSet::from_iter(&vars_before | &vars_after);
     for var in exceptions {
         vars.remove(var.as_str());
@@ -699,6 +699,6 @@ fn run() -> GenericResult<()> {
 /// Run program and handle errors
 fn main() {
     if let Err(msg) = run() {
-        eprintln!("{} {}", "error:".red(), msg)
+        eprintln!("{} {}", "error:".red(), msg);
     }
 }

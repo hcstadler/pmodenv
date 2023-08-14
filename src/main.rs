@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use thiserror::Error;
+use std::string;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync + 'static>;
 type GenericResult<T> = Result<T, GenericError>;
@@ -364,7 +365,7 @@ fn parse_vartypes(types: Vec<String>) -> GenericResult<HashMap<String, Option<St
         }?;
         let var = vardef.unwrap().0;
         if btree
-            .insert(var.to_string(), typ.map(std::string::ToString::to_string))
+            .insert(var.to_string(), typ.map(string::ToString::to_string))
             .is_some()
         {
             return Err(Box::new(ProgramError::Type(format!(
@@ -666,8 +667,8 @@ fn run() -> GenericResult<()> {
 
     let before = parse_env()?;
     let after = HashMap::from_iter(std::env::vars());
-    let vars_before: HashSet<&str> = HashSet::from_iter(before.keys().map(std::string::String::as_str));
-    let vars_after: HashSet<&str> = HashSet::from_iter(after.keys().map(std::string::String::as_str));
+    let vars_before: HashSet<&str> = HashSet::from_iter(before.keys().map(String::as_str));
+    let vars_after: HashSet<&str> = HashSet::from_iter(after.keys().map(String::as_str));
     let mut vars = HashSet::from_iter(&vars_before | &vars_after);
     for var in exceptions {
         vars.remove(var.as_str());

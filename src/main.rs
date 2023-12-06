@@ -697,3 +697,19 @@ fn main() {
         eprintln!("{} {}", "error:".red(), msg);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    //use std::collections::HashMap;
+
+    #[test]
+    fn path_sep_test() {
+        let sep_opt = Some(":".to_owned());
+        let mut map: HashMap<String, Option<String>> = HashMap::new();
+        map.insert("PATH".to_owned(), sep_opt.clone());
+        map.insert("HOME".to_owned(), None);
+        assert_eq!(path_sep("HOME", &map), None);
+        assert_eq!(path_sep("PATH", &map), sep_opt.clone());
+    }
+}

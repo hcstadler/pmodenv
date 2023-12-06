@@ -184,9 +184,9 @@ fn parse_env() -> GenericResult<HashMap<String, String>> {
 /// * `var` Variable name
 /// * `typmap` Variable name to type map
 /// # Return
-/// true if the variable is in the typmap with a nonempty separator
-fn is_path(var: &str, typmap: &HashMap<String, Option<String>>) -> bool {
-    typmap.get(var).is_some()
+/// `Some(sep)` if the variable is in the typmap with a nonempty separator `sep`
+fn path_sep(var: &str, typmap: &HashMap<String, Option<String>>) -> Option<String> {
+    typmap.get(var).unwrap_or(&None).clone()
 }
 
 /// Return canonic path
@@ -682,14 +682,8 @@ fn run() -> GenericResult<()> {
     };
 
     for var in vars {
-        if is_path(var, &vartypes) {
-            let sep = vartypes.get(var).unwrap().as_ref().unwrap_or_else(|| {
-                panic!(
-                    "internal error: expected nonempty separator for variable {}",
-                    var
-                )
-            });
-            handle_path_var(var, sep, &before, &after, &transform, fatal_warnings)?;
+        if let Some(sep) = path_sep(var, &vartypes) {
+            handle_path_var(var, &sep, &before, &after, &transform, fatal_warnings)?;
         } else {
             handle_normal_var(var, &before, &after, fatal_warnings)?;
         }

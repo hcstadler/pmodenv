@@ -10,7 +10,7 @@ edition = "2018"
 [dependencies]
 thiserror = "1"
 text-colorizer = "1"
-clap = { version = "4", features = [ "derive", "cargo", "deprecated" ] }
+clap = { version = "4", features = [ "derive", "cargo" ] }
 
 [profile.release]
 opt-level = "s"

@@ -3,18 +3,20 @@
 //! Program to produce modulefile lines by looking at Linux shell environment differences.
 
 extern crate clap;
+extern crate text_colorizer;
 use clap::{crate_authors, crate_description, crate_name, crate_version, Parser};
+use text_colorizer::Colorize;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use thiserror::Error;
 use std::string;
 
+/// Error type used in function results.
 type GenericError = Box<dyn std::error::Error + Send + Sync + 'static>;
-type GenericResult<T> = Result<T, GenericError>;
 
-extern crate text_colorizer;
-use text_colorizer::Colorize;
+/// Result type used for function results.
+type GenericResult<T> = Result<T, GenericError>;
 
 /// Name of the prefix variable
 ///
@@ -26,7 +28,21 @@ const PREFIX_VAR: &str = "PREFIX";
 /// The separator can be changes per path variable VAR using the `--typ=VAR:p:<separator>` commandline option
 const PATH_SEP: &str = ":";
 
-/// Commandline arguments
+/// Commandline arguments.
+/// * `except` List of ignored environment variables.
+/// * `replace` List of replacement specifications:
+///    - OLD:NEW replaces path fragment OLD with NEW.
+/// * `drop` List of path fragments leading to dropped paths.
+/// * `check_path` Drop paths unaccessible by current user if true.
+/// * `prefix` Value of the PREFIX variable.
+/// * `var` List of variable definitions:
+///    - VAR=VAL creates a variable VAR with value VAL.
+/// * `typ` List of variable type specifications:
+///    - VAR:n sets the type of variable VAR to "normal" (not a path)
+///    - VAR:p sets the type of variable VAR to "path with separator :"
+///    - VAR:p:SEP sets the type of variable VAR to "path with separator SEP"
+/// * `comment` Adds a comment.
+/// * `fatal` Treat warnings as fatal.
 #[derive(Parser, Debug)]
 #[command(name = crate_name!(),
           author = crate_authors!(),
@@ -136,6 +152,14 @@ struct Transform {
     check_path: bool,
 }
 
+/// Error type.
+/// * `Input`: unparseable input
+/// * `NotUtf8`: path contains bad characters
+/// * `Replacement`: wrong replacement specification
+/// * `Output`: output contains more than one line
+/// * `Variable`: wrong variable definition
+/// * `Type`: wrong variable type specification
+/// * `Fatal`: fatal error, terminate program
 #[derive(Error, Debug)]
 enum ProgramError {
     #[error("input not in /proc/self/environ format: {0}")]

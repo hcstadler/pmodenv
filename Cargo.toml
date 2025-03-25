@@ -4,6 +4,9 @@ version = "1.0.0"
 authors = ["Hans-Christian Stadler Kleeb <hans-christian.stadler@psi.ch>"]
 description = "Turns environment differences into a module file"
 edition = "2018"
+license = "GPL-3.0-or-later"
+license-file = "LICENSE"
+rust-version = "1.78.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -475,9 +475,9 @@ fn print_var(op: &str, var: &str) -> GenericResult<()> {
 ///
 /// # Argument
 /// * `op` Binary operation name
-/// * `var` Variable name
-/// * `val` Operand
-/// * `drop_empty` Drop operation if `val` is empty
+/// * `name` Variable name
+/// * `value` Operand
+/// * `drop_empty` Drop operation if `value` is empty
 /// # Examples
 /// ```text
 /// setenv HELLO 1
